@@ -166,8 +166,15 @@ class SharedChangeHub:
                         self.publish(*owner)
             except asyncio.CancelledError:
                 raise
-            except (PyMongoError, RuntimeError):
-                logger.exception('MongoDB Change Streams no disponible (requiere replica set)')
+            except (PyMongoError, RuntimeError) as exc:
+                # CursorKilled al cerrar el último WebSocket es un evento normal:
+                # cancelamos el cursor Mongo para no consumir recursos sin clientes.
+                if not self.subscribers:
+                    logger.debug('Change Stream detenido: sin suscriptores (%s)', type(exc).__name__)
+                    break
+                # Un cursor interrumpido también sucede con failover/reconexiones;
+                # no implica necesariamente que falte un replica set.
+                logger.warning('MongoDB Change Stream interrumpido (%s); reconectando', type(exc).__name__)
                 self.active = False
                 self.broadcast('error')
                 await asyncio.sleep(self.backoff)  # reconexión del transporte, no polling de estado
@@ -217,7 +224,7 @@ async def stream(websocket: WebSocket) -> None:
                 break
             collection = next_event.result()
             if collection == 'error':
-                await websocket.send_json({'type': 'error', 'message': 'MongoDB Change Streams no disponible; verifica replica set.'})
+                await websocket.send_json({'type': 'error', 'message': 'Canal de eventos temporalmente interrumpido. Reconectando…'})
                 continue
             packets = await asyncio.to_thread(snapshots if collection == 'resync' else relevant_messages,
                                               user_id, *([] if collection == 'resync' else [collection]))

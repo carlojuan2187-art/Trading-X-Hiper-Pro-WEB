@@ -25,7 +25,7 @@ def require_session(
     # Independent browser login: HttpOnly session cookie; require CSRF for writes.
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inicia sesión con Telegram")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inicia sesión con tu teléfono")
     payload = verify_session_token(token)
     if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
         origin = request.headers.get("origin", "")

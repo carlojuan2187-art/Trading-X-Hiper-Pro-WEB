@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import time
 import uuid
 from pathlib import Path
@@ -13,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes_admin import router as admin_router
 from app.realtime.stream import router as stream_router
 from app.api.routes_auth import router as auth_router
+from app.api.routes_phone import router as phone_router
 from app.api.routes_billing import router as billing_router
 from app.api.routes_health import router as health_router
 from app.api.routes_market import router as market_router
@@ -31,6 +33,12 @@ def create_app() -> FastAPI:
         docs_url='/docs',
         redoc_url='/redoc',
     )
+
+    @app.on_event('startup')
+    async def ensure_phone_auth_indexes():
+        # La unicidad del teléfono y Telegram ID forma parte de la seguridad.
+        from app.auth.phone_login import init_indexes
+        await asyncio.to_thread(init_indexes)
 
     allow_origins = MINIAPP_ALLOWED_ORIGINS or ['*']
     allow_credentials = '*' not in allow_origins
@@ -110,6 +118,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(phone_router)
     app.include_router(billing_router)
     app.include_router(user_router)
     app.include_router(demo_router)

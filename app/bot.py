@@ -1014,14 +1014,11 @@ async def bot_runtime_heartbeat(context: ContextTypes.DEFAULT_TYPE):
         await _send_runtime_issue_alert(context, 'telegram_bot', outcome)
 
 
-def run_bot():
+def register_bot_handlers(app):
+    """Handlers compartidos por el webhook WEB y el bot legado.
 
-    app = (
-        ApplicationBuilder()
-        .token(TELEGRAM_BOT_TOKEN)
-        .build()
-    )
-
+    No programa jobs ni inicia el trading loop LIVE.
+    """
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", start))
     app.add_handler(CommandHandler("panel", start))
@@ -1030,6 +1027,12 @@ def run_bot():
     app.add_handler(CallbackQueryHandler(callback_router))
     app.add_handler(MessageHandler(filters.CONTACT, verify_contact))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+
+
+def run_bot():
+    """Entrypoint legado por polling: NO ejecutar con el webhook WEB activo."""
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    register_bot_handlers(app)
 
     # ✅ CORRECCIÓN CRÍTICA:
     # Se pasa la MISMA Application al trading loop

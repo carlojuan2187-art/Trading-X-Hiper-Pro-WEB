@@ -1,0 +1,66 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { normalizeTrade, validateReferral } from '../app/web/static/trade-share/share-trade.js';
+import { createQrMatrix } from '../app/web/static/trade-share/qr-code.js';
+
+test('DEMO abierta lleva entrada, capital simulado, beneficio y ROE', () => {
+  const item = normalizeTrade('demo-open', {
+    symbol:'BTC', direction:'long', entry_price:100, mark_price:101,
+    unrealized_pnl_usdc:0.4, margin_usdc:4, leverage:10,
+    wallet:'secret', private_key:'secret', strategy_id:'BREAKOUT_RETEST',
+  });
+  assert.equal(item.mode, 'DEMO'); assert.equal(item.status, 'ABIERTA');
+  assert.equal(item.pnl, 0.4); assert.equal(item.roe, 10); assert.equal(item.estimated, true);
+  assert.equal(item.price, 101); assert.equal(item.entry, 100);
+  assert.ok(!JSON.stringify(item).includes('secret'));
+});
+
+test('DEMO cerrada usa neto y precio de salida, no el mark anterior', () => {
+  const r = normalizeTrade('demo-closed', {
+    symbol: 'ETH', direction:'short', entry_price:1000,
+    exit_price:900, mark_price:999, pnl_net_usdc:2.25,
+    margin_usdc:15, leverage:10, close_reason:'TP', closed_at:'2026-10-13T06:00:00Z'
+  });
+  assert.equal(r.side, 'SHORT'); assert.equal(r.roe, 15);
+  assert.equal(r.price, 900); assert.equal(r.reason,'TP');
+});
+
+test('LIVE cerrada sin margen ni leverage muestra ROE desconocido', () => {
+  const r = normalizeTrade('live-closed', { symbol:'SOL',side:'B',entry_price:100,exit_price:102,profit:-0.25 });
+  assert.equal(r.mode,'LIVE'); assert.equal(r.pnl,-0.25);
+  assert.equal(r.leverage,null); assert.equal(r.roe,null);
+});
+
+test('LIVE sin precio actual no inventa precios ni PnL', () => {
+  const r=normalizeTrade('live-open',{symbol:'SUI',side:'SELL',entry_price:3});
+  assert.equal(r.side,'SHORT'); assert.equal(r.price,null);
+  assert.equal(r.pnl,null); assert.equal(r.roe,null);
+});
+
+test('La tarjeta LIVE puede estimar PnL con cotización bid/ask reciente, sin atribuir comisiones', () => {
+  const p=normalizeTrade('live-open',{symbol:'BTC', direction:'LONG',entry_price:100, share_quote_exit_price:102, qty:2, leverage:10, margin_usdc:20 });
+  assert.equal(p.price,102); assert.equal(p.pnl,4); assert.equal(p.roe,20);
+  assert.equal(p.grossEstimate,true);
+  const noQty=normalizeTrade('live-open',{symbol:'BTC', direction:'LONG',entry_price:100,share_quote_exit_price:102});
+  assert.equal(noQty.pnl,null); assert.equal(noQty.grossEstimate,false);
+});
+
+test('QR se alimenta solo de enlace Telegram que contenga el código correcto', () => {
+  const r=validateReferral({referral_code:'12345',referral_link:'https://t.me/TradingXHiperPro_bot?start=12345'});
+  assert.equal(r.code,'12345'); assert.equal(r.url,'https://t.me/TradingXHiperPro_bot?start=12345');
+  assert.equal(validateReferral({referral_code:'12345',referral_link:'https://t.me/TradingXHiperPro_bot?start=987'}),null);
+  assert.equal(validateReferral({referral_code:'12345',referral_link:'https://evil.example/next?start=12345'}),null);
+  assert.equal(validateReferral({referral_code:'12345',referral_link:'javascript:alert(1)'}),null);
+  assert.equal(validateReferral({referral_code:'12345',referral_link:'https://t.me.evil.example/bot?start=12345'}),null);
+});
+
+test('QR local tiene 37x37 módulos y bitmap binario', () => {
+  const m=createQrMatrix('https://t.me/TradingXHiperPro_bot?start=12345');
+  assert.equal(m.length,37);
+  assert.equal(m[0].length,37);
+  assert.ok(m.every(row=>row.every(cell=>typeof cell==='boolean')));
+});
+
+test('El QR rechaza enlaces demasiado largos de forma explícita', () => {
+  assert.throws(()=>createQrMatrix('https://t.me/'+ 'a'.repeat(120)), /largo/);
+});

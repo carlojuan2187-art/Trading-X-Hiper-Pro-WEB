@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07111d" />
+    <title>Trading X Hiper Pro · Trading Desk</title>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=phase5-share" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div class="grid-overlay"></div>
+
+    <section id="webLoginScreen" class="web-login hidden" aria-labelledby="webLoginTitle">
+      <div class="web-login-card">
+        <div class="web-login-logo"><img src="/static/miniapp-logo.png" alt="Trading X Hiper Pro" /></div>
+        <span class="section-tag">HYPERLIQUID · TRADING PLATFORM</span>
+        <h1 id="webLoginTitle">Trading X Hiper Pro</h1>
+        <p>Accede a tu plataforma de trading desde cualquier navegador. Mantén tu cuenta y tus datos actuales utilizando Telegram.</p>
+        <a class="primary-button web-login-button" href="/api/v1/auth/telegram/oidc/start" id="webLoginButton">Continuar con Telegram</a>
+        <p id="webLoginMessage" class="web-login-message" role="status">Necesitarás autorizar el inicio de sesión con tu cuenta de Telegram.</p>
+        <small>La plataforma solo opera en tu cuenta LIVE cuando tú la activas. La cuenta DEMO se activa de forma independiente y nunca envía órdenes reales.</small>
+      </div>
+    </section>
+
+    <div class="app-frame">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-mark"><img src="/static/miniapp-logo.png" alt="Trading X Hiper Pro" /></div>
+          <div><strong>Trading X</strong><span>Hiper Pro</span></div>
+        </div>
+        <div class="sidebar-live"><span class="live-pulse"></span><span>LIVE DESK</span><small>HYPERLIQUID</small></div>
+        <div class="sidebar-section-label">Workspace</div>
+        <nav class="sidebar-nav" aria-label="Workspace">
+          <button class="tab is-active" data-tab="overview" type="button"><span class="nav-icon">▦</span><span>Dashboard</span></button>
+          <button class="tab" data-tab="demo" type="button"><span class="nav-icon">◉</span><span>Cuenta DEMO</span></button>
+          <button class="tab" data-tab="control" type="button"><span class="nav-icon">◫</span><span>Control</span></button>
+          <button class="tab" data-tab="billing" type="button"><span class="nav-icon">¤</span><span>Pagos</span></button>
+          <button class="tab" data-tab="operations" type="button"><span class="nav-icon">↗</span><span>Operaciones</span></button>
+          <button class="tab hidden" data-tab="system" id="systemTabButton" type="button"><span class="nav-icon">◈</span><span>Sistema</span></button>
+          <button class="tab hidden" data-tab="admin" id="adminTabButton" type="button"><span class="nav-icon">◎</span><span>Admin</span></button>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="sidebar-account-label">ACCOUNT</div>
+          <div class="sidebar-account">
+            <div class="avatar">TX</div>
+            <div><strong id="sidebarUser">Sin sesión</strong><span id="sidebarPlan">Acceso limitado</span></div>
+            <span id="connectionBadge" class="status-pill neutral">Inicializando</span>
+          </div>
+        </div>
+      </aside>
+
+      <div class="main-shell">
+        <header class="topbar">
+          <div class="topbar-left">
+            <div class="mobile-brand"><div class="brand-mark"><img src="/static/miniapp-logo.png" alt="" /></div><div><strong>Trading X Hiper Pro</strong><span>Trading Desk</span></div></div>
+            <div class="desktop-title"><span class="section-tag">AUTOMATED TRADING PLATFORM</span><h1 id="workspaceTitle">Dashboard</h1></div>
+          </div>
+          <div class="topbar-actions">
+            <span class="mode-chip"><span class="mode-chip-label">MODE</span><strong>Control Desk</strong></span>
+            <button class="icon-button" id="refreshButtonTop" type="button" aria-label="Actualizar">↻</button>
+            <button class="primary-button compact-button" id="refreshButton" type="button">Actualizar</button>
+            <button class="secondary-button compact-button" id="logoutButton" type="button" aria-label="Cerrar sesión">Salir</button>
+          </div>
+        </header>
+
+        <div class="mobile-nav-wrap">
+          <nav class="mobile-tabbar" aria-label="Secciones">
+            <button class="tab is-active" data-tab="overview" type="button">Dashboard</button>
+            <button class="tab" data-tab="demo" type="button">DEMO</button>
+            <button class="tab" data-tab="control" type="button">Control</button>
+            <button class="tab" data-tab="billing" type="button">Pagos</button>
+            <button class="tab" data-tab="operations" type="button">Trades</button>
+            <button class="tab hidden" data-tab="system" type="button">Sistema</button>
+            <button class="tab hidden" data-tab="admin" type="button">Admin</button>
+          </nav>
+        </div>
+
+        <section id="statusBanner" class="status-banner info">Inicializando MiniApp...</section>
+
+        <main class="content-stack">
+        <section class="panel is-active" data-panel="overview">
+  <div class="workspace-heading">
+    <div>
+      <span class="section-tag">TRADING DESK · OVERVIEW</span>
+      <h2>Centro de mando</h2>
+      <p>Una lectura ejecutiva del acceso, preparación, capital y rendimiento del sistema.</p>
+    </div>
+    <div class="workspace-heading-actions">
+      <span class="sync-indicator"><span class="pulse-dot"></span> Datos sincronizados</span>
+    </div>
+  </div>
+
+  <div class="kpi-strip" id="dashboardStats"></div>
+
+  <div class="overview-grid">
+    <article class="chart-card chart-card-main">
+      <div class="chart-head">
+        <div>
+          <span class="section-tag">PERFORMANCE</span>
+          <h3>PnL acumulado</h3>
+          <p>Lectura de las operaciones visibles más recientes.</p>
+        </div>
+        <div class="chart-legend"><span class="legend-dot positive"></span><span>Resultado neto</span></div>
+      </div>
+      <div id="equityChart" class="chart-canvas" aria-label="Gráfico de PnL acumulado"></div>
+    </article>
+
+    <article class="status-card">
+      <div class="chart-head compact-head">
+        <div>
+          <span class="section-tag">READINESS</span>
+          <h3>Preparación operativa</h3>
+        </div>
+        <span id="userReadinessBadge" class="status-pill neutral">--</span>
+      </div>
+      <div id="readinessList" class="readiness-list compact-list"></div>
+    </article>
+
+    <article class="chart-card">
+      <div class="chart-head">
+        <div>
+          <span class="section-tag">VENTANAS</span>
+          <h3>Rendimiento por período</h3>
+        </div>
+      </div>
+      <div id="performanceWindowChart" class="bar-chart"></div>
+    </article>
+
+    <article class="account-card">
+      <div class="account-card-head">
+        <div>
+          <span class="section-tag">ACCOUNT</span>
+          <h3>Estado de cuenta</h3>
+        </div>
+        <span id="heroSessionPill" class="status-pill info">Sin sesión</span>
+      </div>
+      <div class="account-main-value" id="heroUser">--</div>
+      <div class="account-subline" id="heroUserSubtext">Esperando autenticación</div>
+      <div class="account-meta-grid">
+        <div><span>Plan</span><strong id="heroPlanPill">Plan --</strong></div>
+        <div><span>Trading</span><strong id="heroTradingPill">Trading --</strong></div>
+        <div><span>Wallet</span><strong id="heroWallet">--</strong></div>
+        <div><span>Acceso</span><strong id="heroAccess">--</strong></div>
+      </div>
+      <div class="account-footline"><span>Credencial</span><strong id="heroKey">--</strong><small id="heroKeySubtext">Sin configurar</small></div>
+      <small class="account-access-subtext" id="heroAccessSubtext">Sin evaluar</small>
+    </article>
+  </div>
+
+  <div class="section-grid-two">
+    <article class="glass-card panel-card">
+      <div class="panel-head">
+        <div><span class="section-tag">WINDOWS</span><h3>Performance por período</h3></div>
+      </div>
+      <div id="performanceGrid" class="performance-grid"></div>
+    </article>
+    <article class="glass-card panel-card">
+      <div class="panel-head">
+        <div><span class="section-tag">REFERRALS</span><h3>Programa de referidos</h3></div>
+      </div>
+      <div id="referralStats" class="stats-grid compact"></div>
+    </article>
+  </div>
+
+  <div class="section-grid-two">
+    <article class="glass-card panel-card">
+      <div class="panel-head">
+        <div><span class="section-tag">ACCESS</span><h3>Plan y continuidad</h3></div>
+      </div>
+      <div id="accessStatsGrid" class="stats-grid"></div>
+    </article>
+    <article class="glass-card panel-card">
+      <div class="panel-head">
+        <div><span class="section-tag">PERFORMANCE</span><h3>Resumen ejecutivo</h3></div>
+      </div>
+      <div id="performanceExecutiveGrid" class="stats-grid"></div>
+    </article>
+  </div>
+
+  <article class="glass-card panel-card">
+    <div class="panel-head">
+      <div><span class="section-tag">ACTIVITY</span><h3>Actividad reciente</h3></div>
+      <span class="table-muted">Últimas lecturas</span>
+    </div>
+    <div id="userActivityList" class="list-stack empty-state">Sin actividad reciente.</div>
+  </article>
+
+  <div class="hidden-data-anchor" aria-hidden="true">
+    <span id="userReadiness">--</span>
+    <span id="summarySystemStatusPanel"></span>
+    <span id="summarySystemOverviewPanel"></span>
+    <span id="systemHealthGrid"></span>
+    <span id="systemRuntimeGrid"></span>
+    <span id="systemRuntimeNotes"></span>
+    <span id="heroWalletSubtext">Sin configurar</span>
+    <span id="walletBadge" class="status-pill neutral">--</span>
+    <span id="userPlanBadge" class="status-pill neutral">--</span>
+    <span id="userIdentity">--</span>
+    <span id="userIdentitySubtext">Sin sesión</span>
+    <span id="userTradingStatus">--</span>
+    <span id="walletConfigured">--</span>
+    <span id="privateKeyConfigured">--</span>
+  </div>
+</section>
+
+        <section class="panel" data-panel="demo" aria-labelledby="demoTitle">
+          <div class="workspace-heading">
+            <div>
+              <span class="section-tag">SIMULADOR · HYPERLIQUID PUBLIC MARKET DATA</span>
+              <h2 id="demoTitle">Cuenta DEMO</h2>
+              <p>Las mismas estrategias del bot, saldo ficticio y cotizaciones reales del mercado. Ninguna orden de esta pantalla usa tus claves LIVE.</p>
+            </div>
+            <span id="demoStatusBadge" class="status-pill neutral">No iniciada</span>
+          </div>
+          <div id="demoNotice" class="status-banner info" role="status">Cargando cuenta simulada…</div>
+          <div class="demo-hero">
+            <div class="demo-balance">
+              <small>EQUITY ESTIMADA · USDC SIMULADOS</small>
+              <strong id="demoEquity">—</strong>
+              <span id="demoPnl">PnL acumulado: —</span>
+            </div>
+            <div class="demo-buttons">
+              <button class="primary-button" id="demoStartButton" type="button">Activar bot DEMO</button>
+              <button class="secondary-button" id="demoPauseButton" type="button">Pausar entradas</button>
+              <button class="secondary-button" id="demoResetButton" type="button">Reiniciar saldo</button>
+            </div>
+          </div>
+          <div class="stats-grid demo-stats" id="demoStats" aria-live="polite"></div>
+          <div class="hl-terminal" data-market-terminal data-mode="DEMO" aria-label="Gráfico DEMO de Hyperliquid con entrada, take profit y stop loss">
+            <p>El gráfico necesita compilar el módulo market-terminal para funcionar.</p>
+          </div>
+          <div class="glass-card panel-card demo-card">
+            <div class="panel-head"><div><span class="section-tag">POSITION · SIMULATED</span><h3>Posición abierta</h3></div><span class="status-pill neutral">PAPER</span></div>
+            <div id="demoPosition" class="empty-state">No tienes posiciones DEMO abiertas.</div>
+          </div>
+          <div class="glass-card panel-card demo-card">
+            <div class="panel-head"><div><span class="section-tag">HISTORY · PAPER TRADING</span><h3>Operaciones cerradas</h3></div><span class="status-pill neutral" id="demoHistoryBadge">0</span></div>
+            <div id="demoHistory" class="list-stack empty-state">Aún no hay operaciones simuladas.</div>
+          </div>
+          <p class="demo-disclaimer">El simulador usa bid/ask del libro público, comisiones y slippage configurado. Los fills son aproximados: no modela profundidad completa, funding ni liquidaciones; los SL/TP se revisan por cada evento bid/ask recibido. Si falla la conexión WebSocket, la gestión se suspende hasta reconectar. Gráfico con líneas de operación e histórico disponibles en el terminal web al compilar market-terminal.</p>
+        </section>
+
+        <section class="panel" data-panel="system">
+          <div class="dashboard-grid">
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">OPERACIÓN TÉCNICA</span>
+                  <h3>Servicios internos</h3>
+                </div>
+              </div>
+              <div id="systemHealthGridPanel" class="stats-grid"></div>
+            </article>
+
+            <article class="glass-card panel-card">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">BACKEND</span>
+                  <h3>Respuesta del servicio</h3>
+                </div>
+              </div>
+              <div id="backendHealthCard" class="stats-grid compact"></div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">RUNTIME</span>
+                  <h3>Lectura técnica</h3>
+                </div>
+              </div>
+              <div id="systemRuntimeGridPanel" class="stats-grid"></div>
+            </article>
+
+            <article class="glass-card panel-card">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">ACTIVIDAD</span>
+                  <h3>Eventos recientes</h3>
+                </div>
+              </div>
+              <div id="systemActivityList" class="list-stack empty-state">Sin actividad cargada todavía.</div>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="control">
+          <div class="control-grid">
+            <article class="glass-card panel-card control-card">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">CONFIGURACIÓN CRÍTICA</span>
+                  <h3>Wallet y private key</h3>
+                </div>
+              </div>
+
+              <div class="info-banner muted">
+                La MiniApp nunca vuelve a leer la private key guardada. Solo muestra si existe o no.
+              </div>
+
+              <form id="configurationForm" class="form-stack">
+                <label class="field-block">
+                  <span>Wallet Hyperliquid</span>
+                  <input id="walletInput" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+                </label>
+
+                <label class="field-block">
+                  <span>Nueva private key</span>
+                  <input id="privateKeyInput" type="password" placeholder="0x... o 64 hex" autocomplete="off" spellcheck="false" />
+                </label>
+
+                <div class="button-row">
+                  <button id="saveConfigurationButton" class="primary-button" type="submit">Guardar configuración</button>
+                  <button id="clearConfigurationButton" class="secondary-button" type="button">Limpiar campos</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="glass-card panel-card control-card">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">CONTROL OPERATIVO</span>
+                  <h3>Activación del bot</h3>
+                </div>
+              </div>
+
+              <div id="controlReadinessBox" class="control-summary-box"></div>
+
+              <div class="terms-box">
+                <div>
+                  <strong>Confirmación de políticas</strong>
+                  <p id="termsStatusText">Pendiente</p>
+                </div>
+                <button id="acceptTermsButton" class="secondary-button" type="button">Confirmar aceptación</button>
+              </div>
+
+              <div class="button-row stacked-mobile">
+                <button id="activateTradingButton" class="success-button" type="button">Activar trading</button>
+                <button id="pauseTradingButton" class="danger-button" type="button">Pausar trading</button>
+              </div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">LECTURA DE CONTROL</span>
+                  <h3>Snapshot operativo</h3>
+                </div>
+              </div>
+              <div id="controlStats" class="stats-grid"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="billing">
+          <div class="dashboard-grid">
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">SUSCRIPCIÓN PREMIUM</span>
+                  <h3>Planes automáticos</h3>
+                </div>
+              </div>
+              <div class="info-banner muted">
+                Genera una orden única en USDT BEP-20 y confirma el pago desde la MiniApp. Solo existen dos planes premium: 15 días por 5 USDT y 30 días por 10 USDT.
+              </div>
+              <div id="billingCatalogGrid" class="stats-grid"></div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">ORDEN ACTIVA</span>
+                  <h3>Pago pendiente o en verificación</h3>
+                </div>
+              </div>
+              <div id="billingOrderBox" class="list-stack empty-state">No hay una orden de pago activa ahora mismo.</div>
+              <div class="button-row stacked-mobile">
+                <button id="billingConfirmButton" class="success-button" type="button">Confirmar pago</button>
+                <button id="billingCancelButton" class="secondary-button" type="button">Cancelar orden</button>
+              </div>
+            </article>
+
+            <article class="glass-card panel-card">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">CONFIGURACIÓN</span>
+                  <h3>Estado del sistema de cobro</h3>
+                </div>
+              </div>
+              <div id="billingConfigGrid" class="stats-grid compact"></div>
+            </article>
+
+            <article class="glass-card panel-card">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">INSTRUCCIONES</span>
+                  <h3>Cómo completar el pago</h3>
+                </div>
+              </div>
+              <div id="billingHelpList" class="list-stack"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="operations">
+          <div class="hl-terminal" data-market-terminal data-mode="LIVE" aria-label="Gráfico LIVE de Hyperliquid con operaciones, TP y SL">
+            <p>Terminal LIVE de solo lectura: al compilar market-terminal aparecerán las marcas del motor.</p>
+          </div>
+
+          <div class="operations-grid">
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head compact">
+                <div>
+                  <span class="section-tag">OPERACIÓN EN CURSO</span>
+                  <h3>Lectura viva del bot</h3>
+                </div>
+                <span id="activeTradeBadge" class="status-pill neutral">LIVE</span>
+              </div>
+              <div id="activeTradeSummary" class="list-stack empty-state">No hay una operación activa registrada ahora mismo.</div>
+            </article>
+
+            <article class="glass-card panel-card">
+              <div class="panel-head compact">
+                <div>
+                  <span class="section-tag">ÚLTIMA APERTURA</span>
+                  <h3>Resumen de entrada</h3>
+                </div>
+                <span class="status-pill neutral">OPEN</span>
+              </div>
+              <div id="latestOpenSummary" class="list-stack empty-state">Sin aperturas registradas.</div>
+            </article>
+
+            <article class="glass-card panel-card">
+              <div class="panel-head compact">
+                <div>
+                  <span class="section-tag">ÚLTIMO CIERRE</span>
+                  <h3>Resumen de salida</h3>
+                </div>
+                <span class="status-pill neutral">CLOSE</span>
+              </div>
+              <div id="latestCloseSummary" class="list-stack empty-state">Sin cierres registrados.</div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head compact">
+                <div>
+                  <span class="section-tag">RESUMEN RECIENTE</span>
+                  <h3>Track record visible</h3>
+                </div>
+              </div>
+              <div id="operationsSummaryGrid" class="stats-grid compact"></div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head compact">
+                <div>
+                  <span class="section-tag">TIMELINE</span>
+                  <h3>Actividad real del usuario</h3>
+                </div>
+                <span id="timelineCount" class="status-pill neutral">0</span>
+              </div>
+              <div id="operationsTimelineGrid" class="stats-grid compact"></div>
+              <div id="operationsTimelineList" class="list-stack empty-state">Sin actividad reciente.</div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head compact">
+                <div>
+                  <span class="section-tag">TRACK RECORD</span>
+                  <h3>Operaciones recientes</h3>
+                </div>
+                <span id="operationsCount" class="status-pill neutral">0</span>
+              </div>
+              <div id="operationsList" class="list-stack empty-state">Sin operaciones recientes.</div>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="admin">
+          <div class="dashboard-grid">
+            <article class="glass-card panel-card">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">ADMIN · VISUAL</span>
+                  <h3>Usuarios y planes</h3>
+                </div>
+              </div>
+              <div id="adminVisualStats" class="stats-grid compact"></div>
+            </article>
+
+            <article class="glass-card panel-card">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">ADMIN · SEGURIDAD</span>
+                  <h3>Secretos en reposo</h3>
+                </div>
+              </div>
+              <div id="adminSecurityStats" class="stats-grid compact"></div>
+              <div class="admin-inline-actions">
+                <button id="adminBulkMigrateButton" class="secondary-button" type="button">Migrar hasta 25 legacy keys</button>
+                <p id="adminBulkMigrationStatus" class="admin-subcopy">Sin migración ejecutada en esta sesión.</p>
+              </div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">ADMIN · PERFORMANCE</span>
+                  <h3>Trading global 30d</h3>
+                </div>
+              </div>
+              <div id="adminTradeStats" class="stats-grid"></div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">ADMIN · HISTORIAL</span>
+                  <h3>Acciones recientes</h3>
+                </div>
+              </div>
+              <div id="adminRecentActions" class="list-stack empty-state">Sin acciones administrativas registradas todavía.</div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">ADMIN · MONITORIZACIÓN</span>
+                  <h3>Feed operativo en vivo</h3>
+                </div>
+              </div>
+              <div id="adminMonitorStats" class="stats-grid compact"></div>
+              <div id="adminMonitorFeed" class="list-stack empty-state">Sin eventos operativos recientes.</div>
+              <div class="admin-inline-actions">
+                <button id="adminClearMonitorButton" class="secondary-button" type="button">Limpiar feed</button>
+                <p id="adminClearMonitorStatus" class="admin-subcopy">Oculta del monitor los eventos ya revisados sin borrar la actividad del usuario.</p>
+              </div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">ADMIN · TELEMETRÍA VIVA</span>
+                  <h3>Motor, scanner y elegibilidad</h3>
+                </div>
+              </div>
+              <div id="adminComponentTelemetry" class="stats-grid compact"></div>
+              <div id="adminOperatorSnapshots" class="list-stack empty-state">Sin lecturas operativas recientes.</div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">ADMIN · POSICIONES VIVAS</span>
+                  <h3>Operaciones abiertas en el sistema</h3>
+                </div>
+              </div>
+              <div id="adminLivePositions" class="list-stack empty-state">Sin posiciones activas ahora mismo.</div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
+                  <span class="section-tag">ADMIN · OPERACIONES</span>
+                  <h3>Buscar usuario y soporte operativo</h3>
+                </div>
+              </div>
+
+              <form id="adminSearchForm" class="admin-search-row">
+                <input id="adminSearchInput" type="text" placeholder="Telegram ID o username" autocomplete="off" spellcheck="false" />
+                <button id="adminSearchButton" class="primary-button" type="submit">Buscar</button>
+              </form>
+
+              <div id="adminSearchResults" class="list-stack empty-state">Busca un usuario para cargar su ficha administrativa.</div>
+
+              <div id="adminUserDetail" class="admin-user-detail hidden">
+                <div class="admin-user-head">
+                  <div>
+                    <span class="section-tag">USUARIO SELECCIONADO</span>
+                    <h3 id="adminUserTitle">—</h3>
+                    <p id="adminUserSubtitle" class="admin-subcopy">—</p>
+                  </div>
+                </div>
+                <div id="adminUserStats" class="stats-grid compact"></div>
+
+                <div class="glass-subcard admin-plan-card">
+                  <div class="panel-head compact no-margin">
+                    <div>
+                      <span class="section-tag">SUSCRIPCIÓN MANUAL</span>
+                      <h3>Agregar días de plan</h3>
+                    </div>
+                    <span class="status-pill info">Manual</span>
+                  </div>
+                  <label class="field-block admin-note-field">
+                    <span>Nota administrativa / motivo</span>
+                    <textarea id="adminActionReasonInput" rows="3" placeholder="Ej: compensación por incidencia, premio, soporte manual..."></textarea>
+                  </label>
+                  <p id="adminPlanGrantHint" class="admin-subcopy">Carga un usuario para aplicar días exactos sin simular una compra automática.</p>
+                  <div id="adminPlanPreviewBox" class="admin-plan-preview">Sin previsualización todavía.</div>
+                  <div class="admin-plan-row">
+                    <label class="field-block compact-field">
+                      <span>Plan</span>
+                      <select id="adminPlanSelect">
+                        <option value="premium" selected>Premium</option>
+                        <option value="trial">Prueba</option>
+                      </select>
+                    </label>
+                    <label class="field-block compact-field">
+                      <span>Días a agregar</span>
+                      <input id="adminPlanDaysInput" type="number" min="1" step="1" placeholder="7" inputmode="numeric" />
+                    </label>
+                    <button id="adminGrantPlanButton" class="success-button" type="button">Confirmar y aplicar</button>
+                  </div>
+                </div>
+
+                <div class="glass-subcard admin-ops-card">
+                  <div class="panel-head compact no-margin">
+                    <div>
+                      <span class="section-tag">CONTROL OPERATIVO</span>
+                      <h3>Soporte del bot</h3>
+                    </div>
+                  </div>
+                  <div class="admin-action-grid">
+                    <button id="adminActivateTradingButton" class="success-button" type="button">Reanudar trading</button>
+                    <button id="adminPauseTradingButton" class="danger-button" type="button">Pausar trading</button>
+                    <button id="adminCloseTradingButton" class="danger-button" type="button">Cerrar trading</button>
+                    <button id="adminMigrateKeyButton" class="secondary-button" type="button">Migrar key legacy</button>
+                    <button id="adminResetCredentialsButton" class="danger-button" type="button">Resetear credencial</button>
+                    <button id="adminResetStatsButton" class="secondary-button" type="button">Resetear rendimiento</button>
+                  </div>
+                </div>
+                <div>
+                  <div class="panel-head compact no-margin">
+                    <div>
+                      <span class="section-tag">USUARIO · PERFORMANCE</span>
+                      <h3>24h · 7d · 30d</h3>
+                    </div>
+                  </div>
+                  <div id="adminUserPerformance" class="stats-grid"></div>
+                </div>
+
+                <div>
+                  <div class="panel-head compact no-margin">
+                    <div>
+                      <span class="section-tag">USUARIO · HISTORIAL ADMIN</span>
+                      <h3>Últimas acciones sobre este usuario</h3>
+                    </div>
+                  </div>
+                  <div id="adminUserActionHistory" class="list-stack empty-state">Sin acciones administrativas sobre este usuario todavía.</div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+      </div>
+    </div>
+
+    <link rel="stylesheet" href="/static/market/market-terminal.css" />
+    <script src="/static/app.js?v=phase5-share"></script>
+    <script type="module" src="/static/market/market-terminal.js"></script>
+    <script type="module" src="/static/trade-share/share-trade.js"></script>
+  </body>
+</html>

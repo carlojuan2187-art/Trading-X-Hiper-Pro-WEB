@@ -1,0 +1,113 @@
+"""Estado DEMO en una sola colección, con CAS por versión por usuario.
+
+Contabilidad de paper trading exclusivamente; no comparte colección con LIVE.
+Las mutaciones usan replace_one con version para evitar dobles cierres/entradas.
+"""
+from __future__ import annotations
+
+from copy import deepcopy
+from datetime import datetime, timezone
+
+from app.database import db
+from app.demo.settings import DEMO_INITIAL_EQUITY_USDC, DEMO_HISTORY_LIMIT
+
+COLLECTION = db['demo_accounts']
+
+
+class Conflict(RuntimeError):
+    """Otro ciclo o usuario modificó la cuenta durante la operación."""
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def make_account(user_id: int) -> dict:
+    return {
+        '_id': int(user_id), 'mode': 'DEMO', 'version': 0, 'enabled': False,
+        'initial_equity_usdc': DEMO_INITIAL_EQUITY_USDC,
+        'balance_usdc': DEMO_INITIAL_EQUITY_USDC,
+        'position_open': False, 'position': None, 'history': [], 'trades_closed': 0,
+        'wins': 0, 'losses': 0, 'realized_pnl_usdc': 0.0,
+        'last_tick_at': None, 'last_signal_at': None, 'last_error': None,
+        'last_entry_at': None, 'last_close_at': None, 'entry_timestamps': [],
+        'risk_consecutive_losses': 0, 'risk_cooldown_until': None, 'risk_cooldown_reason': None,
+        'created_at': now_iso(), 'updated_at': now_iso(),
+    }
+
+
+def get_or_create(user_id: int) -> dict:
+    user_id = int(user_id)
+    COLLECTION.update_one({'_id': user_id}, {'$setOnInsert': make_account(user_id)}, upsert=True)
+    return COLLECTION.find_one({'_id': user_id})
+
+
+def read(user_id: int) -> dict | None:
+    return COLLECTION.find_one({'_id': int(user_id)})
+
+
+def save(previous: dict, updated: dict) -> dict:
+    if previous['_id'] != updated['_id']:
+        raise ValueError('Cambio de propietario prohibido')
+    new_doc = deepcopy(updated)
+    new_doc['version'] = int(previous['version']) + 1
+    new_doc['updated_at'] = now_iso()
+    result = COLLECTION.replace_one(
+        {'_id': previous['_id'], 'version': int(previous['version'])}, new_doc,
+    )
+    if result.modified_count != 1:
+        raise Conflict('Actualización concurrente; reintentar')
+    return new_doc
+
+
+def change_status(user_id: int, *, active: bool) -> dict:
+    for _ in range(4):
+        previous = get_or_create(user_id)
+        if bool(previous['enabled']) == active:
+            return previous
+        updated = deepcopy(previous)
+        updated['enabled'] = active
+        try:
+            return save(previous, updated)
+        except Conflict:
+            continue
+    raise Conflict('Cuenta ocupada; vuelve a intentar')
+
+
+def reset(user_id: int) -> dict:
+    for _ in range(4):
+        previous = get_or_create(user_id)
+        if previous.get('enabled') or previous.get('position'):
+            raise ValueError('Pausa DEMO y espera el cierre de la posición antes de reiniciar')
+        updated = make_account(user_id)
+        updated['created_at'] = previous.get('created_at') or updated['created_at']
+        try:
+            return save(previous, updated)
+        except Conflict:
+            continue
+    raise Conflict('Cuenta ocupada; vuelve a intentar')
+
+
+def as_public(doc: dict) -> dict:
+    result = {k: deepcopy(v) for k, v in doc.items() if k != '_id'}
+    result['user_id'] = doc['_id']
+    position = doc.get('position')
+    unrealized = float(position.get('unrealized_pnl_usdc', 0.0)) if position else 0.0
+    locked = float(position.get('margin_usdc', 0.0)) if position else 0.0
+    balance = float(doc.get('balance_usdc', 0.0))
+    result.update({
+        'unrealized_pnl_usdc': round(unrealized, 8),
+        'equity_usdc': round(balance + unrealized, 8),
+        'available_usdc': round(max(0.0, balance - locked), 8),
+        'locked_margin_usdc': round(locked, 8),
+        'history': list(reversed(result.get('history') or [])),
+    })
+    return result
+
+
+def append_close(updated: dict, trade: dict) -> None:
+    updated['history'] = (list(updated.get('history') or []) + [trade])[-DEMO_HISTORY_LIMIT:]
+    updated['trades_closed'] = int(updated.get('trades_closed', 0)) + 1
+    pnl = float(trade['pnl_net_usdc'])
+    updated['wins' if pnl > 0 else 'losses'] = int(updated.get('wins' if pnl > 0 else 'losses', 0)) + 1
+    updated['realized_pnl_usdc'] = round(float(updated.get('realized_pnl_usdc', 0.0)) + pnl, 8)

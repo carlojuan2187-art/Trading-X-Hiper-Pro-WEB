@@ -1729,11 +1729,6 @@ async function apiFetch(path, options = {}) {
 window.hyperleagueMarketFetch = (path) => apiFetch(path);
 
 function showWebLogin() {
-  const ref = new URLSearchParams(window.location.search).get('ref');
-  const loginButton = $('webLoginButton');
-  if (loginButton && ref && /^\d{1,15}$/.test(ref) && Number(ref) > 0) {
-    loginButton.href = `/api/v1/auth/telegram/oidc/start?ref=${encodeURIComponent(ref)}`;
-  }
   document.body.classList.add('auth-required');
   if (elements.webLoginScreen) elements.webLoginScreen.classList.remove('hidden');
 }
@@ -1746,7 +1741,7 @@ function hideWebLogin() {
 function setPreviewMode() {
   showWebLogin();
   setPill(elements.connectionBadge, 'Preview', 'preview');
-  setStatus('Vista previa pública. Abre esta MiniApp desde Telegram para conectar tu sesión y ver tus datos reales.', 'warning');
+  setStatus('Inicia sesión con teléfono y contraseña para conectar tu cuenta.', 'warning');
   setPill(elements.heroSessionPill, 'Preview', 'preview');
   setPill(elements.heroPlanPill, 'Plan preview', 'preview');
   setPill(elements.heroTradingPill, 'Trading preview', 'preview');
@@ -1783,6 +1778,176 @@ function setPreviewMode() {
 }
 
 
+// Autenticación web: teléfono y contraseña; el bot solo confirma contacto propio.
+let phoneMode = 'login';
+let phoneFlowId = '';
+let phoneVerifyWs = null;
+let phoneCompleting = false;
+
+function phoneMessage(message, error = false) {
+  if (elements.webLoginMessage) {
+    elements.webLoginMessage.textContent = message || '';
+    elements.webLoginMessage.classList.toggle('phone-auth-error', error);
+  }
+}
+
+function flagForIso(iso) {
+  return [...String(iso).toUpperCase()].map(c => String.fromCodePoint(127397 + c.charCodeAt(0))).join('');
+}
+
+function initPhoneAuth() {
+  const country = $('phoneCountry');
+  const filter = $('phoneCountryFilter');
+  const dial = $('phoneDial');
+  const data = Array.isArray(window.HL_PHONE_COUNTRIES) ? window.HL_PHONE_COUNTRIES : [];
+  const drawCountries = () => {
+    const selected = country.value || 'US';
+    const term = (filter.value || '').trim().toLocaleLowerCase('es');
+    country.replaceChildren();
+    for (const item of data) {
+      if (term && !`${item.name} ${item.dial} ${item.iso}`.toLocaleLowerCase('es').includes(term)) continue;
+      const option = document.createElement('option');
+      option.value = item.iso;
+      option.textContent = `${flagForIso(item.iso)} ${item.name} (${item.dial})`;
+      option.dataset.dial = item.dial;
+      country.appendChild(option);
+    }
+    if (Array.from(country.options).some(item => item.value === selected)) country.value = selected;
+    if (country.selectedOptions[0]) dial.textContent = country.selectedOptions[0].dataset.dial;
+  };
+  drawCountries();
+  country.addEventListener('change', () => { if (country.selectedOptions[0]) dial.textContent = country.selectedOptions[0].dataset.dial; });
+  filter.addEventListener('input', drawCountries);
+  const tabs = {login: $('phoneLoginTab'), register: $('phoneRegisterTab')};
+  const submit = $('phoneAuthSubmit');
+  const pwd = $('phonePassword');
+  const confirm = $('phoneConfirmPassword');
+  const setMode = (mode) => {
+    phoneMode = mode;
+    tabs.login.classList.toggle('active', mode === 'login');
+    tabs.register.classList.toggle('active', mode === 'register');
+    tabs.login.setAttribute('aria-pressed', String(mode === 'login'));
+    tabs.register.setAttribute('aria-pressed', String(mode === 'register'));
+    $('phonePasswordConfirmBox').classList.toggle('hidden', mode !== 'register');
+    pwd.autocomplete = mode === 'register' ? 'new-password' : 'current-password';
+    confirm.required = mode === 'register';
+    submit.textContent = mode === 'register' ? 'Crear cuenta y verificar' : 'Continuar con Telegram';
+    phoneMessage('');
+  };
+  tabs.login.addEventListener('click', () => setMode('login'));
+  tabs.register.addEventListener('click', () => setMode('register'));
+  for (const [field, button] of [['phonePassword','phoneRevealPassword'], ['phoneConfirmPassword','phoneRevealConfirm']]) {
+    const input = $(field), eye = $(button);
+    eye.addEventListener('click', () => {
+      const shown = input.type === 'password';
+      input.type = shown ? 'text' : 'password';
+      eye.textContent = shown ? '◉̸' : '👁';
+      eye.setAttribute('aria-label', shown ? 'Ocultar contraseña' : 'Mostrar contraseña');
+      eye.setAttribute('aria-pressed', String(shown));
+    });
+    eye.textContent = '👁';
+  }
+  $('phoneAuthForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (phoneMode === 'register' && pwd.value !== confirm.value) {
+      phoneMessage('Las contraseñas no coinciden.', true);
+      return;
+    }
+    const dialValue = country.selectedOptions[0]?.dataset.dial;
+    if (!dialValue) { phoneMessage('Selecciona un país válido.', true); return; }
+    const national = $('phoneNumber').value.trim();
+    const phone = national.startsWith('+') ? national : dialValue + national.replace(/[^\d]/g, '');
+    submit.disabled = true;
+    phoneMessage('Preparando verificación segura...');
+    try {
+      const ref = new URLSearchParams(location.search).get('ref') || '';
+      const response = await apiFetch('/api/v1/auth/phone/start', {
+        method: 'POST', body: JSON.stringify({mode: phoneMode, phone, password: pwd.value, referrer: ref}),
+      });
+      phoneFlowId = response.flow_id;
+      sessionStorage.setItem('hl_phone_flow', phoneFlowId);
+      sessionStorage.setItem('hl_phone_bot_url', response.telegram_url);
+      pwd.value = '';
+      confirm.value = '';
+      $('phoneAuthForm').classList.add('hidden');
+      $('phoneVerifyStep').classList.remove('hidden');
+      $('phoneBotLink').href = response.telegram_url;
+      $('phoneVerifyState').textContent = 'Esperando que compartas tu contacto...';
+      phoneMessage('Solicitud iniciada. Tienes 10 minutos para verificar.');
+      connectPhoneVerification();
+    } catch (error) {
+      phoneMessage(error.message || 'No se pudo iniciar el registro.', true);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  $('phoneVerifyManually').addEventListener('click', () => completePhoneVerification(true));
+  $('phoneBackToForm').addEventListener('click', () => {
+    if (phoneVerifyWs) phoneVerifyWs.close();
+    phoneFlowId = '';
+    sessionStorage.removeItem('hl_phone_flow');
+    sessionStorage.removeItem('hl_phone_bot_url');
+    $('phoneAuthForm').classList.remove('hidden');
+    $('phoneVerifyStep').classList.add('hidden');
+    phoneMessage('');
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && phoneFlowId) {
+      void completePhoneVerification(false);
+      if (!phoneVerifyWs || phoneVerifyWs.readyState > WebSocket.OPEN) connectPhoneVerification();
+    }
+  });
+  const saved = sessionStorage.getItem('hl_phone_flow');
+  if (saved && /^[A-Za-z0-9_-]{20,48}$/.test(saved)) {
+    phoneFlowId = saved;
+    $('phoneAuthForm').classList.add('hidden');
+    $('phoneVerifyStep').classList.remove('hidden');
+    $('phoneBotLink').href = sessionStorage.getItem('hl_phone_bot_url') || '#';
+    if (!$('phoneBotLink').href || $('phoneBotLink').href.endsWith('#')) $('phoneBotLink').classList.add('hidden');
+    connectPhoneVerification();
+    void completePhoneVerification(false);
+  }
+  setMode('login');
+}
+
+function connectPhoneVerification() {
+  if (!phoneFlowId) return;
+  if (phoneVerifyWs && phoneVerifyWs.readyState <= WebSocket.OPEN) return;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  phoneVerifyWs = new WebSocket(`${proto}//${location.host}/api/v1/auth/phone/updates/${encodeURIComponent(phoneFlowId)}`);
+  phoneVerifyWs.addEventListener('message', (event) => {
+    try {
+      const message = JSON.parse(event.data);
+      if (message.status === 'verified') void completePhoneVerification(false);
+      if (message.status === 'ws_unavailable') $('phoneVerifyState').textContent = 'Puedes usar «Ya compartí mi contacto» para continuar.';
+    } catch (error) { console.warn('Evento de verificación inválido'); }
+  });
+  phoneVerifyWs.addEventListener('close', () => {
+    if (phoneFlowId) $('phoneVerifyState').textContent = 'Usa «Ya compartí mi contacto» si no avanza automáticamente.';
+  });
+}
+
+async function completePhoneVerification(showError) {
+  if (!phoneFlowId || phoneCompleting) return;
+  phoneCompleting = true;
+  try {
+    await apiFetch('/api/v1/auth/phone/complete', {
+      method: 'POST', body: JSON.stringify({flow_id: phoneFlowId}),
+    });
+    sessionStorage.removeItem('hl_phone_flow');
+    sessionStorage.removeItem('hl_phone_bot_url');
+    phoneFlowId = '';
+    if (phoneVerifyWs) phoneVerifyWs.close();
+    window.location.assign('/');
+  } catch (error) {
+    if (showError || !/Todavía falta verificar/.test(error.message || '')) {
+      phoneMessage(error.message || 'Verificación pendiente.', showError);
+    }
+  } finally {
+    phoneCompleting = false;
+  }
+}
+
 async function authenticate() {
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
 
@@ -1801,14 +1966,14 @@ async function authenticate() {
     state.token = payload.access_token;
     state.isAdmin = Boolean(payload.is_admin);
   } else {
-    // Browser: session cookie was established by Telegram OIDC callback.
+    // Browser: phone/password + bot Telegram verificado establecen una cookie segura.
     try {
       const payload = await apiFetch('/api/v1/auth/session');
       state.isAdmin = Boolean(payload.is_admin);
     } catch (error) {
       setPreviewMode();
       if (elements.webLoginMessage) {
-        elements.webLoginMessage.textContent = 'Inicia sesión con Telegram para consultar tus datos de forma segura.';
+        elements.webLoginMessage.textContent = 'Inicia sesión con tu teléfono y contraseña, y verifica con Telegram.';
       }
       return;
     }
@@ -2641,6 +2806,7 @@ function bindActions() {
 
 async function bootstrap() {
   bindTabs();
+  initPhoneAuth();
   bindRefreshShortcuts();
   bindActions();
   if (elements.logoutButton) {

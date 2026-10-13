@@ -11,6 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/static/styles.css?v=phase5-share" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/static/phone-countries.js?v=phone-auth-v1"></script>
   </head>
   <body>
     <div class="ambient ambient-a"></div>
@@ -19,13 +20,36 @@
 
     <section id="webLoginScreen" class="web-login hidden" aria-labelledby="webLoginTitle">
       <div class="web-login-card">
-        <div class="web-login-logo"><img src="/static/miniapp-logo.png" alt="Trading X Hiper Pro" /></div>
-        <span class="section-tag">HYPERLIQUID · TRADING PLATFORM</span>
-        <h1 id="webLoginTitle">Trading X Hiper Pro</h1>
-        <p>Accede a tu plataforma de trading desde cualquier navegador. Mantén tu cuenta y tus datos actuales utilizando Telegram.</p>
-        <a class="primary-button web-login-button" href="/api/v1/auth/telegram/oidc/start" id="webLoginButton">Continuar con Telegram</a>
-        <p id="webLoginMessage" class="web-login-message" role="status">Necesitarás autorizar el inicio de sesión con tu cuenta de Telegram.</p>
-        <small>La plataforma solo opera en tu cuenta LIVE cuando tú la activas. La cuenta DEMO se activa de forma independiente y nunca envía órdenes reales.</small>
+        <div class="web-login-logo"><img src="/static/miniapp-logo.png" alt="Hyper League" /></div>
+        <span class="section-tag">HYPER LEAGUE · TRADING PLATFORM</span>
+        <h1 id="webLoginTitle">Bienvenido a Hyper League</h1>
+        <p class="phone-auth-intro">Accede a tu plataforma con tu número de teléfono. Verifica tu cuenta con el bot oficial de Telegram.</p>
+        <div class="phone-auth-tabs" role="group" aria-label="Tipo de acceso">
+          <button id="phoneLoginTab" type="button" class="phone-auth-tab active" aria-pressed="true">Iniciar sesión</button>
+          <button id="phoneRegisterTab" type="button" class="phone-auth-tab" aria-pressed="false">Registrarse</button>
+        </div>
+        <form id="phoneAuthForm" class="phone-auth-form" autocomplete="on">
+          <label for="phoneCountryFilter">País o región</label>
+          <input id="phoneCountryFilter" class="phone-auth-input" type="search" placeholder="Buscar país o prefijo" autocomplete="off" aria-label="Buscar país" />
+          <select id="phoneCountry" class="phone-auth-input" aria-label="País y prefijo telefónico" required></select>
+          <label for="phoneNumber">Número de teléfono</label>
+          <div class="phone-number-row"><span id="phoneDial" class="phone-dial">+1</span><input id="phoneNumber" class="phone-auth-input" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="Tu número de teléfono" maxlength="35" required /></div>
+          <label for="phonePassword">Contraseña</label>
+          <div class="phone-password-row"><input id="phonePassword" class="phone-auth-input" type="password" autocomplete="current-password" minlength="10" maxlength="128" placeholder="Mínimo 10 caracteres" required /><button type="button" id="phoneRevealPassword" class="phone-eye-button" aria-label="Mostrar contraseña" aria-pressed="false">◉</button></div>
+          <div id="phonePasswordConfirmBox" class="hidden"><label for="phoneConfirmPassword">Confirmar contraseña</label><div class="phone-password-row"><input id="phoneConfirmPassword" class="phone-auth-input" type="password" autocomplete="new-password" minlength="10" maxlength="128" placeholder="Repite la contraseña" /><button type="button" id="phoneRevealConfirm" class="phone-eye-button" aria-label="Mostrar confirmación" aria-pressed="false">◉</button></div></div>
+          <div class="phone-auth-explain">🔒 Compartirás tu propio contacto con Telegram después de continuar. Nunca te pediremos la contraseña dentro del bot.</div>
+          <button class="primary-button web-login-button" id="phoneAuthSubmit" type="submit">Continuar con Telegram</button>
+        </form>
+        <div id="phoneVerifyStep" class="phone-verify-step hidden">
+          <h2>Verifica tu teléfono en Telegram</h2>
+          <p>Abre el bot y pulsa <strong>Compartir mi número</strong>. Debe ser el mismo que acabas de escribir.</p>
+          <a class="primary-button web-login-button" id="phoneBotLink" target="_blank" rel="noopener noreferrer">Abrir bot de Telegram</a>
+          <span id="phoneVerifyState" class="phone-verify-state" role="status">Esperando verificación...</span>
+          <button class="secondary-button" id="phoneVerifyManually" type="button">Ya compartí mi contacto</button>
+          <button class="phone-back-button" id="phoneBackToForm" type="button">Volver al formulario</button>
+        </div>
+        <p id="webLoginMessage" class="web-login-message" role="status" aria-live="polite"></p>
+        <small>DEMO opera con capital simulado. LIVE necesita configuración independiente.</small>
       </div>
     </section>
 
@@ -665,7 +689,7 @@
     </div>
 
     <link rel="stylesheet" href="/static/market/market-terminal.css" />
-    <script src="/static/app.js?v=phase5-share"></script>
+    <script src="/static/app.js?v=phone-auth-v1"></script>
     <script type="module" src="/static/market/market-terminal.js"></script>
     <script type="module" src="/static/trade-share/share-trade.js"></script>
   </body>

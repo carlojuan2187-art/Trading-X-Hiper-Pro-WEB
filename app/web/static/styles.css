@@ -410,3 +410,34 @@ body.auth-required .app-frame { display: none; }
 .trade-share-note { min-height:16px; margin:0 0 12px; color:#91b3c9; font-size:11px; }
 .trade-share-error { position:fixed; z-index:1100; bottom:20px; left:20px; right:20px; max-width:520px; margin:auto; padding:13px 16px; background:#461c29; border:1px solid #ff5c7c; border-radius:12px; color:#ffe4ea; font-size:13px; }
 @media(max-width:600px) { .trade-share-backdrop { padding:8px; align-items:center; } .trade-share-dialog { max-height:calc(100dvh - 16px); padding:13px; } .trade-share-preview canvas { width:min(100%,280px); } .trade-share-actions { grid-template-columns:1fr; } }
+
+/* Acceso telefónico independiente de Telegram OIDC. */
+.web-login-card { text-align:left; width:min(480px,100%); }
+.web-login-card .web-login-logo { margin-left:auto; margin-right:auto; }
+.web-login-card > h1, .web-login-card > .section-tag, .web-login-card > .phone-auth-intro {display:block;text-align:center;}
+.phone-auth-tabs { display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:5px;background:#0a1624;border:1px solid var(--line-strong);border-radius:12px;margin:22px 0; }
+.phone-auth-tab {border:0;border-radius:9px;background:transparent;color:#9baec4;padding:12px 8px;font:600 14px Inter,sans-serif;cursor:pointer;}
+.phone-auth-tab.active {color:#f2f8ff;background:#203752;box-shadow:0 2px 8px #0004;}
+.phone-auth-form {display:flex;flex-direction:column;gap:8px;}
+.phone-auth-form label {font-size:12px;font-weight:650;color:#b5c9de;text-align:left;margin-top:5px;}
+.phone-auth-input {box-sizing:border-box;width:100%;min-width:0;background:#0a1726;border:1px solid #315069;color:#ecf8ff;border-radius:11px;padding:12px 14px;font:500 14px Inter,sans-serif;min-height:46px;}
+.phone-auth-input:focus-visible,.phone-eye-button:focus-visible,.phone-auth-tab:focus-visible {outline:2px solid #31c4eb;outline-offset:2px;}
+.phone-auth-input::placeholder {color:#8193a7;}
+.phone-number-row,.phone-password-row {display:flex;align-items:stretch;gap:8px;}
+.phone-dial {display:flex;align-items:center;justify-content:center;min-width:63px;padding:0 10px;border:1px solid #315069;border-radius:11px;background:#112438;color:#fff;font-weight:650;}
+.phone-password-row {position:relative;gap:0;}
+.phone-password-row .phone-auth-input {padding-right:52px;}
+.phone-eye-button {position:absolute;right:3px;top:3px;bottom:3px;min-width:43px;background:transparent;border:0;color:#c6d7e4;cursor:pointer;font-size:19px;}
+.phone-auth-explain {padding:12px 13px;border:1px solid rgba(37,199,186,.22);border-radius:10px;background:rgba(13,70,83,.22);color:#aec7d9;font-size:12px;line-height:1.6;margin-top:10px;}
+.web-login .web-login-button {margin:12px 0 12px;text-align:center;cursor:pointer;border:0;}
+.web-login .web-login-button:disabled {opacity:.5;cursor:wait;}
+.web-login-message {min-height:20px;overflow-wrap:anywhere;}
+.web-login-message.phone-auth-error {color:#ff939f;}
+.phone-verify-step {text-align:center;display:flex;flex-direction:column;gap:12px;}
+.phone-verify-step h2 {margin:5px 0 0;color:#e3f5ff;font-size:18px;}
+.phone-verify-step p {margin:0;}
+.phone-verify-step .web-login-button {margin:0;}
+.phone-verify-state {font-size:12px;color:#90c9da;}
+.phone-verify-step .secondary-button {padding:11px;border-radius:10px;cursor:pointer;}
+.phone-back-button {border:0;background:none;color:#8bc6ef;cursor:pointer;text-decoration:underline;padding:8px;}
+@media(max-width:480px){.web-login {padding:12px;}.web-login-card {padding:22px 17px;}.web-login-logo {margin-bottom:12px;}}

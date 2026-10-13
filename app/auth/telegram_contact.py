@@ -1,6 +1,7 @@
 """Telegram: verificar solamente el contacto propio enviado en chat privado."""
 from __future__ import annotations
 
+import asyncio
 import re
 
 from telegram import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
@@ -20,8 +21,10 @@ async def start_phone_verification(update: Update, context: ContextTypes.DEFAULT
     if not match:
         return False
     flow_id = match.group(1)
-    pending = FLOWS.find_one({'_id': flow_id, 'state': 'pending',
-                              'expires_at': {'$gt': datetime.now(timezone.utc)}})
+    pending = await asyncio.to_thread(
+        FLOWS.find_one, {'_id': flow_id, 'state': 'pending',
+                         'expires_at': {'$gt': datetime.now(timezone.utc)}}
+    )
     if not pending:
         await update.message.reply_text('La solicitud venció. Regresa a la web y comienza otra vez.')
         return True
@@ -52,7 +55,7 @@ async def verify_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not contact or not actor or int(contact.user_id or 0) != int(actor.id):
         await update.message.reply_text('Debes compartir tu propio número con el botón de Telegram, no otro contacto.')
         return
-    outcome = confirm_contact(flow_id, actor.id, contact.phone_number)
+    outcome = await asyncio.to_thread(confirm_contact, flow_id, actor.id, contact.phone_number)
     if outcome == 'ok':
         context.user_data.pop('phone_auth_flow_id', None)
         await update.message.reply_text('✅ Número confirmado. Regresa a Hyper League para continuar.',

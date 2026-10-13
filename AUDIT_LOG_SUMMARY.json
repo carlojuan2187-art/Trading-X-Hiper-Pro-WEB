@@ -1,0 +1,45 @@
+{
+  "first_timestamp": "2026-09-28T13:45:46.664452348Z",
+  "last_timestamp": "2026-09-28T14:28:59.968029338Z",
+  "scans": 144,
+  "rejections": {
+    "NO_H1_BIAS": 305,
+    "ROUTER_REGIME_NO_TRADE": 60,
+    "NO_5M_CONTINUATION_CONFIRM": 19,
+    "NO_LIQUIDITY_SWEEP_SETUP": 12,
+    "ATR_TOO_LOW": 6,
+    "NO_M15_BIAS": 11,
+    "STRUCTURAL_SL_TOO_WIDE": 3,
+    "RESET_TOO_DEEP": 1,
+    "TOO_EXTENDED_AFTER_CONFIRM": 3
+  },
+  "total_rejections": 420,
+  "budget_exhausted": 0,
+  "bias_diagnostics": {
+    "NO_H1_BIAS": 64,
+    "NO_M15_BIAS": 6
+  },
+  "h1_ema200_only": 11,
+  "liquidity_statuses": {
+    "NOT_ROUTED": 94,
+    "EVALUATED_REJECTED": 9
+  },
+  "liquidity_regimes": {
+    "RANGE": 14,
+    "TREND_CONTINUATION": 80,
+    "VOLATILE_SWEEP": 9
+  },
+  "sweep_failure_counts": {
+    "NO_SWEEP_DEPTH": 108,
+    "EMA20_RECOVERY": 1,
+    "EMA50_RECOVERY": 1,
+    "SWEEP_CLOSE_WEAK": 2,
+    "TRIGGER_BODY": 1,
+    "TRIGGER_CLOSE_POSITION": 1,
+    "TRIGGER_NOT_CONFIRMED": 1,
+    "TRIGGER_VOLUME": 1,
+    "SWEEP_WICK_TOO_SMALL": 1
+  },
+  "gate_block_messages": 0,
+  "limitations": "Counts include repeated evaluations and users; not independent trades. First-failure filters censor later gates."
+}

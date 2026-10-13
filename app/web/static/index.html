@@ -256,6 +256,17 @@
               <button class="secondary-button" id="demoResetButton" type="button">Reiniciar saldo</button>
             </div>
           </div>
+          <form class="demo-capital-form" id="demoCapitalForm" autocomplete="off">
+            <div class="demo-capital-copy">
+              <label for="demoCapitalInput">Capital inicial DEMO (USDC)</label>
+              <small>Elige el saldo simulado antes de operar. No afecta a tu wallet ni al capital LIVE.</small>
+            </div>
+            <div class="demo-capital-actions">
+              <input id="demoCapitalInput" type="number" min="10" max="100000" step="0.01" inputmode="decimal" required aria-label="Capital inicial DEMO en USDC" />
+              <button class="secondary-button" id="demoCapitalSave" type="submit">Guardar capital</button>
+            </div>
+            <small id="demoCapitalHint" class="demo-capital-hint" role="status">Puedes cambiarlo con DEMO pausado y sin operaciones. Reiniciar saldo borra el historial.</small>
+          </form>
           <div class="stats-grid demo-stats" id="demoStats" aria-live="polite"></div>
           <div class="hl-terminal" data-market-terminal data-mode="DEMO" aria-label="Gráfico DEMO de Hyperliquid con entrada, take profit y stop loss">
             <p>El gráfico necesita compilar el módulo market-terminal para funcionar.</p>

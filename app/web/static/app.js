@@ -40,6 +40,10 @@ const elements = {
   demoStartButton: $('demoStartButton'),
   demoPauseButton: $('demoPauseButton'),
   demoResetButton: $('demoResetButton'),
+  demoCapitalForm: $('demoCapitalForm'),
+  demoCapitalInput: $('demoCapitalInput'),
+  demoCapitalSave: $('demoCapitalSave'),
+  demoCapitalHint: $('demoCapitalHint'),
   systemTabButton: $('systemTabButton'),
   heroSessionPill: $('heroSessionPill'),
   heroPlanPill: $('heroPlanPill'),
@@ -2551,7 +2555,20 @@ function renderDemo() {
   setPill(elements.demoStatusBadge, d.enabled ? 'Bot DEMO activo' : 'Bot DEMO pausado', d.enabled ? 'active' : 'warning');
   elements.demoEquity.textContent = demoCash(d.equity_usdc);
   elements.demoPnl.textContent = `PnL realizado: ${demoCash(d.realized_pnl_usdc)} · Flotante: ${demoCash(d.unrealized_pnl_usdc)}`;
+  if (elements.demoCapitalInput && document.activeElement !== elements.demoCapitalInput) {
+    elements.demoCapitalInput.value = Number(d.initial_equity_usdc ?? 100).toFixed(2);
+  }
+  const canChangeCapital = !d.enabled && !d.position && !d.position_open
+    && Number(d.trades_closed || 0) === 0 && !(d.history || []).length;
+  if (elements.demoCapitalSave) elements.demoCapitalSave.disabled = !canChangeCapital;
+  if (elements.demoCapitalInput) elements.demoCapitalInput.disabled = !canChangeCapital;
+  if (elements.demoCapitalHint) elements.demoCapitalHint.textContent = canChangeCapital
+    ? 'Saldo simulado individual. Puedes modificarlo antes de la primera operación.'
+    : d.enabled ? 'Pausa DEMO antes de configurar el capital.'
+    : d.position ? 'Espera al cierre de la posición antes de configurar capital.'
+    : 'Ya hay operaciones registradas. Usa Reiniciar saldo para borrarlas si quieres comenzar de cero con otro capital.';
   elements.demoStats.innerHTML = [
+    demoMetric('Capital inicial', demoCash(d.initial_equity_usdc)),
     demoMetric('Saldo realizado', demoCash(d.balance_usdc)),
     demoMetric('Margen libre', demoCash(d.available_usdc)),
     demoMetric('Margen reservado', demoCash(d.locked_margin_usdc)),
@@ -2593,6 +2610,8 @@ async function loadDemo() {
     elements.demoStartButton.disabled = true;
     elements.demoPauseButton.disabled = true;
     elements.demoResetButton.disabled = true;
+    if (elements.demoCapitalSave) elements.demoCapitalSave.disabled = true;
+    if (elements.demoCapitalInput) elements.demoCapitalInput.disabled = true;
   } finally {
     state.demoLoading = false;
   }
@@ -2609,6 +2628,31 @@ async function mutateDemo(path, confirmation = false) {
   } catch (error) {
     await loadDemo();
     elements.demoNotice.textContent = error.message || 'No pudo completarse la operación.';
+    elements.demoNotice.className = 'status-banner warning';
+  }
+}
+
+async function saveDemoCapital(event) {
+  event.preventDefault();
+  if (!elements.demoCapitalInput || !elements.demoCapitalSave) return;
+  const value = Number(elements.demoCapitalInput.value);
+  if (!Number.isFinite(value) || value < 10 || value > 100000 || Math.round(value * 100) / 100 !== value) {
+    elements.demoNotice.textContent = 'Escribe un capital de 10 a 100000 USDC, máximo dos decimales.';
+    elements.demoNotice.className = 'status-banner warning';
+    return;
+  }
+  elements.demoCapitalSave.disabled = true;
+  try {
+    state.demo = await apiFetch('/api/v1/demo/capital', {
+      method: 'POST', body: JSON.stringify({ capital_usdc: value }),
+    });
+    // /capital es una mutación protegida con sesión y CAS. Actualizamos datos con GET.
+    await loadDemo();
+    elements.demoNotice.textContent = `Capital inicial DEMO configurado: ${demoCash(value)}.`;
+    elements.demoNotice.className = 'status-banner success';
+  } catch (error) {
+    await loadDemo();
+    elements.demoNotice.textContent = error.message || 'No fue posible actualizar el capital DEMO.';
     elements.demoNotice.className = 'status-banner warning';
   }
 }
@@ -2712,6 +2756,7 @@ function bindActions() {
   elements.demoStartButton?.addEventListener('click', () => mutateDemo('/api/v1/demo/start'));
   elements.demoPauseButton?.addEventListener('click', () => mutateDemo('/api/v1/demo/pause'));
   elements.demoResetButton?.addEventListener('click', () => mutateDemo('/api/v1/demo/reset', true));
+  elements.demoCapitalForm?.addEventListener('submit', saveDemoCapital);
   elements.refreshButton.addEventListener('click', async () => {
     elements.refreshButton.disabled = true;
   if (elements.systemTabButton) elements.systemTabButton.classList.add('hidden');

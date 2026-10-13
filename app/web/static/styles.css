@@ -372,6 +372,16 @@ body.auth-required .app-frame { display: none; }
 .demo-balance span { font-size:12px; color:#a9bed2; }
 .demo-buttons { display:flex; gap:9px; flex-wrap:wrap; }
 .demo-buttons button:disabled { opacity:.43; cursor:not-allowed; }
+.demo-capital-form{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;padding:17px;margin:0 0 16px;border:1px solid rgba(39,212,255,.19);border-radius:15px;background:rgba(13,33,48,.72)}
+.demo-capital-copy{flex:1 1 215px;display:flex;flex-direction:column;gap:5px}
+.demo-capital-copy label{font-size:14px;font-weight:700;color:#ebf9ff}
+.demo-capital-copy small,.demo-capital-hint{font-size:11px;line-height:1.5;color:#9cb3c8}
+.demo-capital-actions{display:flex;flex:0 1 280px;align-items:stretch;gap:8px}
+.demo-capital-actions input{width:105px;min-width:0;flex:1 1 100px;border-radius:10px;padding:10px;color:#ecf8ff;background:#0a1726;border:1px solid #315069;font-size:15px}
+.demo-capital-actions button{white-space:nowrap;min-height:42px;cursor:pointer}
+.demo-capital-actions button:disabled{cursor:not-allowed;opacity:.5}
+.demo-capital-hint{flex-basis:100%}
+@media(max-width:520px){.demo-capital-actions{flex:1 1 100%}.demo-capital-actions input{width:100%;max-width:none}}
 .demo-stats { margin-bottom:16px; }
 .demo-metric { border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:6px; min-width:0; background:rgba(255,255,255,.02); }
 .demo-metric span { color:#9bb0c5; font-size:11px; }

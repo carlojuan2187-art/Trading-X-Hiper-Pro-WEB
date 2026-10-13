@@ -215,6 +215,7 @@ class DemoMarketRunner:
             self.pending = None
             self.next_scan = time.monotonic()
             self.next_lease = time.monotonic()
+            self.next_ping = time.monotonic() + 25
             if not await asyncio.to_thread(acquire_lease):
                 raise RuntimeError('La réplica DEMO no es el líder')
             await self.subscribe_new(ws)
@@ -224,6 +225,11 @@ class DemoMarketRunner:
                     if not await asyncio.to_thread(acquire_lease):
                         raise RuntimeError('Lease perdido: se detiene gestión DEMO')
                     self.next_lease = now + 15
+                # Hyperliquid cierra las conexiones sin actividad; mantener
+                # alive incluso si todavía no hay símbolos con posiciones.
+                if now >= self.next_ping:
+                    await ws.send(json.dumps({'method': 'ping'}))
+                    self.next_ping = time.monotonic() + 25
                 if now >= self.next_scan:
                     try:
                         await asyncio.to_thread(self.select_signal)
@@ -231,7 +237,7 @@ class DemoMarketRunner:
                         logger.exception('Scanner DEMO failed; without new entries')
                     self.next_scan = time.monotonic() + DEMO_SCAN_SECONDS
                     await self.subscribe_new(ws)
-                timeout = min(self.next_scan, self.next_lease) - time.monotonic()
+                timeout = min(self.next_scan, self.next_lease, self.next_ping) - time.monotonic()
                 try:
                     raw = await asyncio.wait_for(ws.recv(), timeout=max(.01, timeout))
                 except asyncio.TimeoutError:

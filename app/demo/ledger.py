@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import math
 
 from app.database import db
 from app.demo.settings import DEMO_INITIAL_EQUITY_USDC, DEMO_HISTORY_LIMIT
@@ -22,11 +23,27 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def make_account(user_id: int) -> dict:
+def validate_demo_capital(amount: float) -> float:
+    # Capital simulado: nunca afecta a fondos LIVE, wallet ni apalancamiento.
+    if isinstance(amount, bool):
+        raise ValueError('Capital DEMO inválido')
+    try:
+        result = float(amount)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('Capital DEMO inválido') from exc
+    if not math.isfinite(result) or not 10 <= result <= 100000:
+        raise ValueError('El capital DEMO debe estar entre 10 y 100000 USDC')
+    if round(result, 2) != result:
+        raise ValueError('Máximo dos decimales para el capital DEMO')
+    return round(result, 2)
+
+
+def make_account(user_id: int, *, initial_equity: float | None = None) -> dict:
+    amount = DEMO_INITIAL_EQUITY_USDC if initial_equity is None else validate_demo_capital(initial_equity)
     return {
         '_id': int(user_id), 'mode': 'DEMO', 'version': 0, 'enabled': False,
-        'initial_equity_usdc': DEMO_INITIAL_EQUITY_USDC,
-        'balance_usdc': DEMO_INITIAL_EQUITY_USDC,
+        'initial_equity_usdc': amount,
+        'balance_usdc': amount,
         'position_open': False, 'position': None, 'history': [], 'trades_closed': 0,
         'wins': 0, 'losses': 0, 'realized_pnl_usdc': 0.0,
         'last_tick_at': None, 'last_signal_at': None, 'last_error': None,
@@ -74,12 +91,35 @@ def change_status(user_id: int, *, active: bool) -> dict:
     raise Conflict('Cuenta ocupada; vuelve a intentar')
 
 
+def configure_initial_capital(user_id: int, amount: float) -> dict:
+    amount = validate_demo_capital(amount)
+    for _ in range(4):
+        previous = get_or_create(user_id)
+        if previous.get('enabled') or previous.get('position') or previous.get('position_open'):
+            raise ValueError('Pausa DEMO y espera el cierre de la posición antes de configurar capital')
+        # Nunca reescribir un historial ni PnL. El usuario puede usar Reiniciar saldo
+        # explícitamente y luego asignar un capital nuevo si quiere empezar de cero.
+        if (previous.get('history') or int(previous.get('trades_closed') or 0)
+                or float(previous.get('realized_pnl_usdc') or 0) != 0):
+            raise ValueError('Para cambiar capital con operaciones previas, usa Reiniciar saldo (borra historial) primero')
+        if float(previous.get('initial_equity_usdc') or 0) == amount and float(previous.get('balance_usdc') or 0) == amount:
+            return previous
+        updated = deepcopy(previous)
+        updated['initial_equity_usdc'] = amount
+        updated['balance_usdc'] = amount
+        try:
+            return save(previous, updated)
+        except Conflict:
+            continue
+    raise Conflict('Cuenta ocupada; vuelve a intentar')
+
+
 def reset(user_id: int) -> dict:
     for _ in range(4):
         previous = get_or_create(user_id)
         if previous.get('enabled') or previous.get('position'):
             raise ValueError('Pausa DEMO y espera el cierre de la posición antes de reiniciar')
-        updated = make_account(user_id)
+        updated = make_account(user_id, initial_equity=previous.get('initial_equity_usdc', DEMO_INITIAL_EQUITY_USDC))
         updated['created_at'] = previous.get('created_at') or updated['created_at']
         try:
             return save(previous, updated)

@@ -18,3 +18,7 @@ PyJWT[crypto]>=2.9.0,<3.0.0
 
 # Worker DEMO: mercado por WebSocket sin polling de cotizaciones
 websockets>=13.1,<17.0
+
+# Registro telefónico y hashing de contraseñas
+phonenumbers>=8.13.47,<9.0
+argon2-cffi>=23.1.0,<26.0

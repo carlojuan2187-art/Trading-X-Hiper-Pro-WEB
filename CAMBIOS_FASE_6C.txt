@@ -1,0 +1,29 @@
+CAMBIOS FASE 6C (comparados con Fase 6B)
+
+MODIFICADOS:
+  app/api/routes_demo.py
+  app/demo/ledger.py
+  app/demo/worker.py
+  app/realtime/stream.py
+  app/web/static/app.js
+  app/web/static/index.html
+  app/web/static/styles.css
+  build_web.sh
+  mise.toml
+  start_web.sh
+  tools/test_demo_offline.py
+
+NUEVOS:
+  FASE_6C_GRAFICO_Y_CAPITAL_DEMO.md
+
+ELIMINADOS:
+  Ninguno
+
+INSTALACION:
+- Archivo completo: sustituir el proyecto en el repositorio WEB, conservando la estructura.
+- Parche: extraer su contenido en la RAIZ del repositorio WEB (app/ dentro de app/).
+- Railway WEB/API: Build Command bash build_web.sh ; Start Command bash start_web.sh.
+- Railway MOTOR-TRADING: Build pip install -r requirements.txt ; Start python -m app.demo.worker.
+- Comprobar logs de compilacion Vite. NO añadir servicios ni variables.
+- No implementar LIVE ni cambiar el bot autenticacion.
+- La compilacion real del grafico requiere acceso npm en Railway; no pudo verificarse en este entorno sin red.

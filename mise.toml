@@ -1,3 +1,6 @@
+[tools]
+node = "22.16.0"
+
 [settings]
 # Railway/Railpack may hit GitHub's unauthenticated API rate limit while
 # verifying Python artifact attestations. Disable only the attestation

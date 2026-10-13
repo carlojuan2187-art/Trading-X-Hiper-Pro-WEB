@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from app.api.dependencies import require_session
 from app.demo import ledger
@@ -9,6 +10,10 @@ from app.demo.credentials import user_ready
 from app.demo.settings import DEMO_ENABLED, DEMO_TAKER_FEE_BPS, DEMO_SLIPPAGE_BPS
 
 router = APIRouter(prefix='/api/v1/demo', tags=['demo'])
+
+
+class DemoCapitalBody(BaseModel):
+    capital_usdc: float = Field(ge=10, le=100000, allow_inf_nan=False)
 
 
 def enabled_or_503() -> None:
@@ -40,6 +45,17 @@ def demo_pause(session: dict = Depends(require_session)) -> dict:
     enabled_or_503()
     try:
         return ledger.as_public(ledger.change_status(int(session['user_id']), active=False))
+    except ledger.Conflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post('/capital')
+def demo_capital(body: DemoCapitalBody, session: dict = Depends(require_session)) -> dict:
+    enabled_or_503()
+    try:
+        return ledger.as_public(ledger.configure_initial_capital(int(session['user_id']), body.capital_usdc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ledger.Conflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

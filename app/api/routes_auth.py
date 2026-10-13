@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from urllib.parse import urlencode, urlsplit
 
@@ -65,6 +66,34 @@ def _require_web_login_config() -> None:
         raise HTTPException(status_code=503, detail="Origen web o callback OIDC inválidos")
 
 
+def _oidc_id_token_or_reject(payload: object) -> str:
+    """Accept only a usable ID token; log diagnostic *metadata*, never OAuth values.
+
+    Some upstream error payloads are returned as JSON without an ``id_token``.
+    That must never be treated as a successful authentication nor raise an
+    opaque KeyError; a sanitized OAuth error code is safe for diagnosis.
+    """
+    if not isinstance(payload, dict):
+        logger.warning("Telegram OIDC token response invalid JSON structure")
+        raise ValueError("oidc_token_payload_not_object")
+
+    token = payload.get("id_token")
+    if not isinstance(token, str) or not token.strip():
+        raw_code = payload.get("error")
+        oauth_code = raw_code if isinstance(raw_code, str) and re.fullmatch(r"[a-z0-9_.-]{1,64}", raw_code) else "unknown"
+        # Whitelist field *names* only. Values may contain tokens or secrets.
+        safe_fields = sorted(set(payload) & {
+            "access_token", "error", "error_description", "expires_in",
+            "id_token", "scope", "token_type",
+        })
+        logger.warning(
+            "Telegram OIDC token response missing id_token (oauth_error=%s; fields=%s)",
+            oauth_code, ",".join(safe_fields) or "none",
+        )
+        raise ValueError("oidc_id_token_missing")
+    return token
+
+
 @router.get('/telegram/oidc/start', include_in_schema=False)
 def start_web_login(ref: str = '') -> Response:
     _require_web_login_config()
@@ -99,6 +128,8 @@ async def telegram_oidc_callback(request: Request, code: str = '', state: str = 
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
+    # Delimit stages so a failed token exchange cannot be mistaken for
+    # a signature/claims error, and never log codes, states or JWTs.
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
             token_response = await client.post(
@@ -113,14 +144,29 @@ async def telegram_oidc_callback(request: Request, code: str = '', state: str = 
                 auth=(TELEGRAM_OIDC_CLIENT_ID, TELEGRAM_OIDC_CLIENT_SECRET),
             )
             token_response.raise_for_status()
-            id_token = token_response.json()['id_token']
-        verified = verify_telegram_id_token(id_token, client_id=TELEGRAM_OIDC_CLIENT_ID, nonce=flow['nonce'])
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-        logger.warning('Telegram OIDC callback failed (%s)', type(exc).__name__)
+    except httpx.HTTPStatusError as exc:
+        logger.warning('Telegram OIDC token exchange rejected (http_status=%d)', exc.response.status_code)
         raise HTTPException(status_code=401, detail="No se pudo verificar el acceso con Telegram") from exc
+    except httpx.RequestError as exc:
+        logger.warning('Telegram OIDC token exchange transport error (%s)', type(exc).__name__)
+        raise HTTPException(status_code=401, detail="No se pudo verificar el acceso con Telegram") from exc
+
+    try:
+        token_payload = token_response.json()
+    except ValueError as exc:
+        logger.warning('Telegram OIDC token response is not valid JSON')
+        raise HTTPException(status_code=401, detail="No se pudo verificar el acceso con Telegram") from exc
+
+    try:
+        id_token = _oidc_id_token_or_reject(token_payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="No se pudo verificar el acceso con Telegram") from exc
+
+    try:
+        verified = verify_telegram_id_token(id_token, client_id=TELEGRAM_OIDC_CLIENT_ID, nonce=flow['nonce'])
     except Exception as exc:
-        # PyJWT validation errors must also fail closed, without leaking tokens.
-        logger.warning('Telegram OIDC signature/claims validation failed (%s)', type(exc).__name__)
+        # Fail closed on any JWT/JWKS/claim validation error.
+        logger.warning('Telegram OIDC token signature/claims rejected (%s)', type(exc).__name__)
         raise HTTPException(status_code=401, detail="Identidad de Telegram no verificada") from exc
 
     user_id = int(verified['user_id'])

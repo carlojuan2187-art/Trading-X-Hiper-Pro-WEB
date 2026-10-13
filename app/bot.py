@@ -64,6 +64,7 @@ from app.database import (
 
 from app.hyperliquid_client import get_balance
 from app.trading_loop import trading_loop
+from app.auth.telegram_contact import start_phone_verification, verify_contact
 
 
 def _strategy_overview_fallback(user_id: int | None = None, limit_recent_events: int = 25) -> dict:
@@ -104,6 +105,10 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
+
+# El logging HTTPX puede mostrar URLs con el token del bot: no registrarlas.
+logging.getLogger('httpx').disabled = True
+logging.getLogger('httpcore').disabled = True
 
 _RUNTIME_ALERTS: dict[str, float] = {}
 
@@ -358,6 +363,8 @@ async def _send_miniapp_redirect_message(target, user_id: int, title: str, as_ed
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    if await start_phone_verification(update, context):
+        return
     user = update.effective_user
     user_id = user.id
     create_user(user.id, user.username)
@@ -1021,6 +1028,7 @@ def run_bot():
     app.add_handler(CommandHandler("miniapp", miniapp_command))
     app.add_handler(CommandHandler("strategy", strategy_status_command))
     app.add_handler(CallbackQueryHandler(callback_router))
+    app.add_handler(MessageHandler(filters.CONTACT, verify_contact))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
     # ✅ CORRECCIÓN CRÍTICA:

@@ -53,20 +53,55 @@ def fee_usdc(notional: float) -> float:
     return _money(notional * DEMO_TAKER_FEE_BPS / 10000.0)
 
 
+def entry_gate_reason(account: dict, *, now: datetime | None = None) -> str | None:
+    """Control DEMO persistente por usuario equivalente a cuotas/cooldown LIVE.
+
+    No lee el estado LIVE ni toca sus gobernadores globales. Esta función se
+    ejecuta antes del scanner y de nuevo justo antes de ejecutar una señal.
+    """
+    if not account.get('enabled') or account.get('position'):
+        return 'NOT_ELIGIBLE'
+    now = now or datetime.now(timezone.utc)
+    try:
+        until = datetime.fromisoformat(str(account.get('risk_cooldown_until')))
+        until = until if until.tzinfo else until.replace(tzinfo=timezone.utc)
+        if now < until:
+            return 'RISK_COOLDOWN'
+    except (ValueError, TypeError):
+        pass
+    from app import trading_engine as engine
+    if float(account.get('balance_usdc') or 0) < float(engine.MIN_CAPITAL_USDC):
+        return 'MIN_CAPITAL'
+    try:
+        last = datetime.fromisoformat(str(account.get('last_entry_at') or account.get('last_close_at')))
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if (now - last).total_seconds() < engine.USER_TRADE_COOLDOWN_SECONDS:
+            return 'TRADE_COOLDOWN'
+    except (ValueError, TypeError):
+        pass
+    recent = account.get('entry_timestamps') or []
+    parsed = []
+    for ts in recent:
+        try:
+            t = datetime.fromisoformat(str(ts))
+            parsed.append(t if t.tzinfo else t.replace(tzinfo=timezone.utc))
+        except (ValueError, TypeError):
+            continue
+    if MAX_TRADES_PER_HOUR is not None and sum(t >= now - timedelta(hours=1) for t in parsed) >= MAX_TRADES_PER_HOUR:
+        return 'MAX_TRADES_PER_HOUR'
+    if MAX_TRADES_PER_DAY is not None and sum(t.date() == now.date() for t in parsed) >= MAX_TRADES_PER_DAY:
+        return 'MAX_TRADES_PER_DAY'
+    return None
+
+
 def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict | None:
     """Evalúa riesgo, drift y SL/TP ESTRUCTURAL con las funciones originales.
 
     None = sin entrada apta. Las funciones de exchange LIVE no se importan ni invocan.
     """
-    if not account.get('enabled') or account.get('position'):
+    if entry_gate_reason(account) is not None:
         return None
-    try:
-        until = datetime.fromisoformat(str(account.get('risk_cooldown_until')))
-        until = until if until.tzinfo else until.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) < until:
-            return None
-    except (ValueError, TypeError):
-        pass
     direction = str(selected.get('direction') or '').lower()
     if direction not in {'long', 'short'}:
         return None
@@ -83,29 +118,7 @@ def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict
     balance = float(account['balance_usdc'])
     if balance < float(engine.MIN_CAPITAL_USDC):
         return None
-    # La cuenta DEMO conserva cooldown y cuotas de entrada del motor LIVE,
-    # pero en persistencia por usuario (sobrevive reinicios).
-    now = datetime.now(timezone.utc)
-    try:
-        last = datetime.fromisoformat(str(account.get('last_entry_at') or account.get('last_close_at')))
-        if last.tzinfo is None:
-            last = last.replace(tzinfo=timezone.utc)
-        if (now - last).total_seconds() < engine.USER_TRADE_COOLDOWN_SECONDS:
-            return None
-    except (ValueError, TypeError):
-        pass
-    recent = account.get('entry_timestamps') or []
-    recent_dt = []
-    for ts in recent:
-        try:
-            parsed = datetime.fromisoformat(ts)
-            recent_dt.append(parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc))
-        except (ValueError, TypeError):
-            continue
-    if MAX_TRADES_PER_HOUR is not None and sum(t >= now - timedelta(hours=1) for t in recent_dt) >= MAX_TRADES_PER_HOUR:
-        return None
-    if MAX_TRADES_PER_DAY is not None and sum(t.date() == now.date() for t in recent_dt) >= MAX_TRADES_PER_DAY:
-        return None
+    # La política de cuotas y cooldown ya se comprueba en entry_gate_reason.
     risk = validate_trade_conditions(balance, float(selected.get('strength') or 0))
     if not risk.get('ok'):
         return None
@@ -149,13 +162,24 @@ def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict
         'stop_price': float(plan['stop_price']), 'target_price': float(plan['target_price']),
         'rr': float(plan['rr']), 'strategy_id': str(signal.get('strategy_id') or ''),
         'regime_id': str(signal.get('regime_id') or ''),
+        'strategy_model': str(signal.get('strategy_model') or ''),
+        'router_decision': str(signal.get('router_decision') or ''),
+        'signal_strength': float(selected.get('strength') or 0),
+        'signal_score': float(signal.get('score') or 0),
+        'scanner_score': float((selected.get('scanner') or {}).get('score') or 0),
+        'signal_reference_price': float(signal.get('signal_reference_price') or 0),
+        'entry_spread_bps': round(spread, 4),
+        'slippage_model_bps': float(DEMO_SLIPPAGE_BPS),
+        'entry_fee_model_bps': float(DEMO_TAKER_FEE_BPS),
+        'execution_model': 'paper_bid_ask',
+        'decision_source': 'live_scanner_router',
         'opened_at': now_iso(), 'entry_fee_usdc': entry_fee,
         'mark_price': (bid + ask) / 2, 'unrealized_pnl_usdc': 0.0,
     }
     updated['position_open'] = True
     updated['last_signal_at'] = now_iso()
     updated['last_entry_at'] = now_iso()
-    updated['entry_timestamps'] = [x for x in recent if x >= (now - timedelta(days=1)).isoformat()] + [now_iso()]
+    updated['entry_timestamps'] = [x for x in (account.get('entry_timestamps') or []) if isinstance(x, str) and x >= (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()] + [now_iso()]
     updated['last_error'] = None
     return updated
 

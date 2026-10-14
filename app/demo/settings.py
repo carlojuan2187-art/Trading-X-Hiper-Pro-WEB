@@ -19,3 +19,7 @@ DEMO_TAKER_FEE_BPS = _float_env('DEMO_TAKER_FEE_BPS', 5.0, 0.0, 50.0)
 DEMO_SLIPPAGE_BPS = _float_env('DEMO_SLIPPAGE_BPS', 2.0, 0.0, 50.0)
 DEMO_SCAN_SECONDS = _float_env('DEMO_SCAN_SECONDS', 300.0, 60.0, 3600.0)
 DEMO_HISTORY_LIMIT = 200
+
+# Límite de evaluaciones profundas por ciclo para no sobrecargar el scanner.
+# Las cuentas elegibles rotan equitativamente entre ciclos. No cambia estrategias.
+DEMO_MAX_USERS_PER_SCAN = int(_float_env('DEMO_MAX_USERS_PER_SCAN', 5, 1, 25))

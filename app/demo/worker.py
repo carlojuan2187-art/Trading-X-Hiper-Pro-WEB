@@ -18,10 +18,10 @@ from pymongo.errors import DuplicateKeyError
 
 from app.database import db, touch_runtime_component
 from app.demo import ledger
-from app.demo.settings import DEMO_ENABLED, DEMO_SCAN_SECONDS
+from app.demo.settings import DEMO_ENABLED, DEMO_SCAN_SECONDS, DEMO_MAX_USERS_PER_SCAN
 from app.demo.credentials import user_ready
 from app.demo.market_events import decode_book
-from app.demo.simulator import open_position, update_position
+from app.demo.simulator import open_position, update_position, entry_gate_reason
 
 logger = logging.getLogger(__name__)
 LEASES = db['demo_worker_leases']
@@ -78,42 +78,30 @@ def tick(*, do_scan: bool = False, quote_provider=None, selector=None) -> dict:
     if not do_scan:
         return result
     eligible = [account for account in ledger.COLLECTION.find({'enabled': True, 'position': None})
-                if user_ready(int(account['_id']))]
+                if entry_gate_reason(account) is None and user_ready(int(account['_id']))]
     if not eligible:
         return result
     result['scan_attempted'] = True
-    try:
-        if selector is None:
-            # MISMA rutina scanner/router LIVE, etiquetada DEMO, sin ordenes.
-            selected = engine._select_best_signal_from_scanner_shortlist(
-                int(eligible[0]['_id']), set(), execution_mode='demo',
-            )
-        else:
-            selected = selector(int(eligible[0]['_id']))
-    except Exception:
-        logger.exception('DEMO scanner/router failed')
-        return result
-    if not selected:
-        return result
-    try:
-        bid, ask = quote(str(selected['symbol']))
-    except Exception:
-        logger.exception('DEMO market quote unavailable symbol=%s', selected['symbol'])
-        return result
+    # LIVE selecciona una señal por usuario. Nunca copiar una decisión de un usuario a otro.
     for account in eligible:
+        uid = int(account['_id'])
         try:
-            # La CAS fallará sin consecuencias si alguien pausó/reseteó mientras se escaneaba.
-            current = ledger.read(account['_id'])
-            if not current or not current['enabled'] or current.get('position'):
+            selected = (selector(uid) if selector is not None else
+                        engine._select_best_signal_from_scanner_shortlist(uid, set(), execution_mode='demo'))
+            if not selected:
+                continue
+            bid, ask = quote(str(selected['symbol']))
+            current = ledger.read(uid)
+            if not current or entry_gate_reason(current) is not None or not user_ready(uid):
                 continue
             updated = open_position(current, selected, bid, ask)
             if updated:
                 ledger.save(current, updated)
                 result['opened'] += 1
         except ledger.Conflict:
-            logger.info('DEMO update conflict user=%s', account['_id'])
+            logger.info('DEMO concurrent update user=%s', uid)
         except Exception:
-            logger.exception('DEMO open failed user=%s', account['_id'])
+            logger.exception('DEMO scanner/entry failed user=%s', uid)
     return result
 
 
@@ -127,7 +115,9 @@ class DemoMarketRunner:
 
     def __init__(self):
         self.subscribed: set[str] = set()
-        self.pending: dict | None = None
+        # user_id -> (selected_signal, monotonically-ordered queue timestamp)
+        self.pending_by_user: dict[int, tuple[dict, float]] = {}
+        self.scan_offset = 0
         self.next_scan = time.monotonic()  # scanner es candle-driven, no polling de precios
         self.next_lease = time.monotonic()
 
@@ -157,45 +147,69 @@ class DemoMarketRunner:
         return marked, closed
 
     def open_if_pending(self, symbol: str, bid: float, ask: float) -> int:
-        if not self.pending or str(self.pending.get('symbol', '')).upper() != symbol:
-            return 0
-        selected, self.pending = self.pending, None
         opened = 0
-        for account in ledger.COLLECTION.find({'enabled': True, 'position': None}):
+        now = time.monotonic()
+        # Consume únicamente las señales del símbolo recibido y de su propietario.
+        for uid, (selected, issued_at) in list(self.pending_by_user.items()):
+            if str(selected.get('symbol', '')).upper() != symbol:
+                continue
+            self.pending_by_user.pop(uid, None)
+            # Una señal que esperó demasiado no equivale a la ejecución LIVE inmediata.
+            if now - issued_at > 30:
+                logger.info('DEMO señal caducada user=%s symbol=%s', uid, symbol)
+                continue
             try:
-                uid = int(account['_id'])
-                if not user_ready(uid):
-                    continue
                 current = ledger.read(uid)
-                if not current or not current.get('enabled') or current.get('position'):
+                if not current or entry_gate_reason(current) is not None or not user_ready(uid):
                     continue
                 updated = open_position(current, selected, bid, ask)
                 if updated:
                     ledger.save(current, updated)
                     opened += 1
             except ledger.Conflict:
-                logger.info('DEMO concurrent open avoided')
+                logger.info('DEMO concurrent open avoided user=%s', uid)
             except Exception:
-                logger.exception('DEMO open failed')
+                logger.exception('DEMO open failed user=%s', uid)
         return opened
 
-    def select_signal(self) -> None:
+    def collect_signals(self) -> tuple[dict[int, tuple[dict, float]], int]:
+        """Blocking strategy evaluation; never executed on the WebSocket event loop."""
         from app import trading_engine as engine
-        eligible = [a for a in ledger.COLLECTION.find({'enabled': True, 'position': None})
-                    if user_ready(int(a['_id']))]
-        self.pending = None
-        if not eligible:
-            return
-        # MISMO selector y router LIVE; sin ejecutar órdenes reales.
-        self.pending = engine._select_best_signal_from_scanner_shortlist(
-            int(eligible[0]['_id']), set(), execution_mode='demo',
+        eligible = sorted(
+            (a for a in ledger.COLLECTION.find({'enabled': True, 'position': None})
+             if entry_gate_reason(a) is None and user_ready(int(a['_id']))),
+            key=lambda a: int(a['_id']),
         )
+        if not eligible:
+            return {}, self.scan_offset
+        start = self.scan_offset % len(eligible)
+        pool = [eligible[(start + i) % len(eligible)] for i in range(min(len(eligible), DEMO_MAX_USERS_PER_SCAN))]
+        next_offset = (start + len(pool)) % len(eligible)
+        if len(eligible) > len(pool):
+            logger.warning('DEMO scanner rotativo: %s/%s usuarios en este ciclo', len(pool), len(eligible))
+        pending: dict[int, tuple[dict, float]] = {}
+        for account in pool:
+            uid = int(account['_id'])
+            try:
+                # Una decisión independiente por usuario; scanner y router LIVE.
+                selected = engine._select_best_signal_from_scanner_shortlist(uid, set(), execution_mode='demo')
+                if selected and selected.get('symbol'):
+                    pending[uid] = (selected, time.monotonic())
+            except Exception:
+                logger.exception('DEMO scanner/router error user=%s', uid)
+        return pending, next_offset
+
+    def select_signal(self) -> None:
+        """Adaptador síncrono para pruebas; producción usa collect_signals en thread."""
+        self.pending_by_user, self.scan_offset = self.collect_signals()
 
     async def subscribe_new(self, ws) -> None:
         wanted = {str(a['position']['symbol']).upper()
                   for a in ledger.COLLECTION.find({'position_open': True}) if a.get('position')}
-        if self.pending and self.pending.get('symbol'):
-            wanted.add(str(self.pending['symbol']).upper())
+        # Solo símbolos de señales frescas. Un WS sin cotización NO puede abrir.
+        now = time.monotonic()
+        self.pending_by_user = {uid: p for uid, p in self.pending_by_user.items() if now - p[1] <= 30}
+        wanted.update(str(selected['symbol']).upper() for selected, _ in self.pending_by_user.values())
         # Protección de límites de upstream: si se supera el máximo, abortar
         # para no fingir que el motor puede gestionar todos los SL.
         if len(wanted) > 100:
@@ -212,7 +226,7 @@ class DemoMarketRunner:
             raise RuntimeError('HYPERLIQUID_WS_URL debe utilizar wss://')
         async with connect(HL_WS_URL, ping_interval=20, ping_timeout=20, max_size=2**20) as ws:
             self.subscribed = set()
-            self.pending = None
+            self.pending_by_user.clear()
             self.next_scan = time.monotonic()
             self.next_lease = time.monotonic()
             self.next_ping = time.monotonic() + 25
@@ -220,6 +234,7 @@ class DemoMarketRunner:
             if not await asyncio.to_thread(acquire_lease):
                 raise RuntimeError('La réplica DEMO no es el líder')
             await self.subscribe_new(ws)
+            scan_task = None
             while True:
                 now = time.monotonic()
                 if now >= self.next_lease:
@@ -238,13 +253,22 @@ class DemoMarketRunner:
                 if now >= self.next_ping:
                     await ws.send(json.dumps({'method': 'ping'}))
                     self.next_ping = time.monotonic() + 25
-                if now >= self.next_scan:
+                # El scanner puede tardar muchos segundos. Jamás bloquear el
+                # procesamiento de book, SL/TP y heartbeats mientras evalúa.
+                if scan_task is not None and scan_task.done():
                     try:
-                        await asyncio.to_thread(self.select_signal)
+                        self.pending_by_user, self.scan_offset = scan_task.result()
                     except Exception:
-                        logger.exception('Scanner DEMO failed; without new entries')
-                    self.next_scan = time.monotonic() + DEMO_SCAN_SECONDS
+                        logger.exception('Scanner DEMO failed; no new entries')
+                        self.pending_by_user.clear()
+                    scan_task = None
                     await self.subscribe_new(ws)
+                if now >= self.next_scan:
+                    if scan_task is None:
+                        scan_task = asyncio.create_task(asyncio.to_thread(self.collect_signals))
+                    else:
+                        logger.warning('DEMO scanner anterior sigue en curso; se omite duplicado')
+                    self.next_scan = time.monotonic() + DEMO_SCAN_SECONDS
                 timeout = min(self.next_scan, self.next_lease, self.next_ping, self.next_status) - time.monotonic()
                 try:
                     raw = await asyncio.wait_for(ws.recv(), timeout=max(.01, timeout))

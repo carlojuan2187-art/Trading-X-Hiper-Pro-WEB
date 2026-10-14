@@ -128,6 +128,39 @@ def reset(user_id: int) -> dict:
     raise Conflict('Cuenta ocupada; vuelve a intentar')
 
 
+def recent_strategy_metrics(history: list[dict]) -> list[dict]:
+    """Estadísticas netas por estrategia sobre historial DEMO retenido (max 200).
+
+    No atribuir estas métricas a todo el historial si el límite de retención
+    ya descartó operaciones anteriores. Nunca lee estadísticas LIVE.
+    """
+    by_strategy: dict[str, dict] = {}
+    for trade in history:
+        name = str(trade.get('strategy_id') or 'SIN_ESTRATEGIA')
+        row = by_strategy.setdefault(name, {
+            'strategy_id': name, 'trades': 0, 'wins': 0, 'losses': 0,
+            'net_pnl_usdc': 0.0, 'gross_wins_usdc': 0.0, 'gross_losses_usdc': 0.0,
+        })
+        pnl = float(trade.get('pnl_net_usdc') or 0)
+        row['trades'] += 1
+        row['net_pnl_usdc'] += pnl
+        if pnl > 0:
+            row['wins'] += 1
+            row['gross_wins_usdc'] += pnl
+        elif pnl < 0:
+            row['losses'] += 1
+            row['gross_losses_usdc'] -= pnl
+    for row in by_strategy.values():
+        total = row['trades']
+        row['win_rate_pct'] = round(100 * row['wins'] / total, 2) if total else 0.0
+        row['profit_factor'] = (round(row['gross_wins_usdc'] / row['gross_losses_usdc'], 4)
+                                if row['gross_losses_usdc'] else None)
+        row['net_pnl_usdc'] = round(row['net_pnl_usdc'], 8)
+        row['gross_wins_usdc'] = round(row['gross_wins_usdc'], 8)
+        row['gross_losses_usdc'] = round(row['gross_losses_usdc'], 8)
+    return sorted(by_strategy.values(), key=lambda row: row['net_pnl_usdc'], reverse=True)
+
+
 def as_public(doc: dict) -> dict:
     result = {k: deepcopy(v) for k, v in doc.items() if k != '_id'}
     result['user_id'] = doc['_id']
@@ -141,6 +174,8 @@ def as_public(doc: dict) -> dict:
         'available_usdc': round(max(0.0, balance - locked), 8),
         'locked_margin_usdc': round(locked, 8),
         'history': list(reversed(result.get('history') or [])),
+        'recent_strategy_metrics': recent_strategy_metrics(doc.get('history') or []),
+        'strategy_metrics_scope': 'retained_demo_history_only',
     })
     return result
 

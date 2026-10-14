@@ -501,6 +501,7 @@ def _m15_confirmation(tf_ctx: Dict[str, Any], direction: str, *, demo_trial: boo
 
 def _detect_simple_mtf_trigger(
     *,
+    demo_trial: bool = False,
     direction: str,
     o: List[float],
     h: List[float],
@@ -515,8 +516,9 @@ def _detect_simple_mtf_trigger(
     if MTF_PENDING_SETUP_ENABLED:
         return find_pending_reset(direction=direction, o=o, h=h, l=l, c=c,
             ema20=ema20, ema50=ema50, atr=atr, max_age=MTF_SETUP_MAX_AGE_BARS,
-            touch_atr=RESET_TOUCH_TOL_ATR, break_atr=RESET_BREAK_TOL_ATR,
-            confirm_atr=CONTINUATION_CONFIRM_TOL_ATR,
+            touch_atr=(0.48 if demo_trial else RESET_TOUCH_TOL_ATR),
+            break_atr=RESET_BREAK_TOL_ATR,
+            confirm_atr=(0.28 if demo_trial else CONTINUATION_CONFIRM_TOL_ATR),
             max_extension=TRIGGER_MAX_EMA20_EXTENSION_ATR)
     if len(c) < max(EMA_SLOW + 5, 80):
         return False, "NOT_ENOUGH_BARS", {}
@@ -778,6 +780,7 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> dict:
 
         direction = bias1h
         ok_trigger, reason5, diag5 = _detect_simple_mtf_trigger(
+            demo_trial=demo_trial,
             direction=direction,
             o=o5,
             h=h5,

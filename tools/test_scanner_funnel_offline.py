@@ -106,5 +106,34 @@ class ScannerFunnelTest(unittest.TestCase):
         self.assertEqual(scanner.get_scanner_funnel_snapshot()["shortlisted"], 3)
 
 
+    def test_demo_looser_book_filter_never_leaks_to_live_cache(self):
+        scanner = self.scanner
+        markets = {"BTC-PERP": market(), "ETH-PERP": market()}
+        with patch.object(scanner, "_fetch_markets", return_value=markets), \
+             patch.object(scanner, "_fetch_l2_quality", return_value=quality(book=750)):
+            demo = scanner.get_ranked_symbols(execution_mode="demo")
+            live = scanner.get_ranked_symbols()
+            demo_again = scanner.get_ranked_symbols(execution_mode="demo")
+            live_again = scanner.get_ranked_symbols()
+        self.assertEqual({r["symbol"] for r in demo}, {"BTC-PERP", "ETH-PERP"})
+        self.assertEqual(live, [])
+        self.assertEqual(demo_again, demo)
+        self.assertEqual(live_again, [])
+        self.assertEqual(scanner._DEMO_LAST_GOOD_RESULTS, demo)
+        self.assertEqual(scanner._LAST_GOOD_RESULTS, [])
+
+    def test_demo_book_filter_still_blocks_very_thin_or_wide_books(self):
+        scanner = self.scanner
+        markets = {"BTC-PERP": market(), "ETH-PERP": market()}
+        books = {"BTC-PERP": quality(book=200), "ETH-PERP": quality(spread=35, book=3000)}
+        with patch.object(scanner, "_fetch_markets", return_value=markets), \
+             patch.object(scanner, "_fetch_l2_quality", side_effect=books.get):
+            self.assertEqual(scanner._get_live_results(set(), execution_mode="demo"), [])
+        counters = scanner.get_scanner_funnel_snapshot()
+        self.assertEqual(counters.get("top_book_rejected"), 1)
+        self.assertEqual(counters.get("spread_rejected"), 1)
+        self.assertEqual(counters.get("mode_demo"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

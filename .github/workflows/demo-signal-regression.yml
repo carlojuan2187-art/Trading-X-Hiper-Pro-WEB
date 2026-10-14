@@ -1,0 +1,34 @@
+name: DEMO scanner and entry regressions
+on:
+  pull_request:
+    paths:
+      - 'app/market_scanner.py'
+      - 'app/trading_engine.py'
+      - 'app/demo/simulator.py'
+      - 'app/strategies/breakout_reset.py'
+      - 'tests/**'
+      - 'tools/test_*offline.py'
+      - '.github/workflows/demo-signal-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Scanner regression
+        run: python tools/test_scanner_funnel_offline.py
+      - name: Strategy contracts
+        run: python -m unittest discover -s tests -p 'test_*.py' -q
+      - name: DEMO execution and risk isolation
+        run: python tools/test_demo_offline.py

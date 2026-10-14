@@ -5,6 +5,7 @@ Al arrancar registra el webhook oficial; no usa getUpdates/polling.
 from __future__ import annotations
 
 import logging
+import asyncio
 
 from telegram.ext import ApplicationBuilder
 
@@ -50,12 +51,32 @@ async def start_telegram_webhook(app) -> None:
         raise
     app.state.telegram_application = tg
     app.state.telegram_webhook_secret = secret
+    # Heartbeat REAL del webhook dentro de WEB/API (no arrancar polling).
+    async def _webhook_runtime_heartbeat():
+        from app.database import touch_runtime_component
+        while getattr(app.state, 'telegram_application', None) is tg and tg.running:
+            try:
+                await asyncio.to_thread(touch_runtime_component, 'telegram_bot',
+                    'online', metadata={'mode': 'webhook', 'execution_mode': 'WEB', 'path': WEBHOOK_PATH})
+            except Exception:
+                logger.warning('No se pudo actualizar heartbeat Telegram webhook; se reintentará')
+            await asyncio.sleep(50)
+
+    app.state.telegram_heartbeat_task = asyncio.create_task(_webhook_runtime_heartbeat())
     logger.info('Telegram webhook listo en %s (sin polling ni trading loop)', WEBHOOK_PATH)
 
 
 async def stop_telegram_webhook(app) -> None:
     tg = getattr(app.state, 'telegram_application', None)
+    task = getattr(app.state, 'telegram_heartbeat_task', None)
+    app.state.telegram_heartbeat_task = None
     app.state.telegram_application = None
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     app.state.telegram_webhook_secret = None
     if tg is not None:
         if tg.running:

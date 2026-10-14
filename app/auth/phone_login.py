@@ -105,6 +105,25 @@ def _check_password(password: str) -> None:
         raise PhoneAuthError('La contraseña debe tener entre 10 y 128 caracteres')
 
 
+def authenticate_password_login(phone: str, password: str, source_ip: str) -> int:
+    """Regreso de usuario previamente verificado: Argon2 y límites; sin Telegram nuevo."""
+    _check_password(password)
+    number = normalize_phone(phone)
+    hit_limit('phone:' + number, 10, 900)
+    hit_limit('source:' + str(source_ip), 150, 900)
+    existing = CREDENTIALS.find_one({'_id': number})
+    try:
+        candidate = existing.get('password_hash') if existing else DUMMY_HASH
+        matches = HASHER.verify(candidate, password)
+        uid = int(existing['telegram_user_id']) if existing and matches and existing.get('verified_at') else 0
+    except (argon_errors.VerifyMismatchError, argon_errors.VerificationError,
+            argon_errors.InvalidHashError, KeyError, ValueError, TypeError):
+        uid = 0
+    if uid <= 0:
+        raise PhoneAuthError('Teléfono o contraseña incorrectos', 401)
+    return uid
+
+
 def begin_flow(phone: str, password: str, mode: str, referrer: str, source_ip: str) -> tuple[str, str]:
     _check_password(password)
     number = normalize_phone(phone)

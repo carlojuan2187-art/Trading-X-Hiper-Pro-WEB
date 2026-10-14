@@ -169,6 +169,26 @@ class PhoneFlowTests(unittest.TestCase):
             self.start('login', 'incorrect-password-xxxxxxxx')
         self.assertEqual(wrong.exception.status, 401)
 
+    def test_verified_user_logs_in_with_password_no_new_telegram_flow(self):
+        flow, secret = self.start()
+        self.auth.confirm_contact(flow, 505, '+17875551234')
+        self.auth.finish_flow(flow, secret)
+        n_before = len(self.auth.FLOWS.rows)
+        uid = self.auth.authenticate_password_login('+17875551234', 'LongStrongPassword!23', 'tester')
+        self.assertEqual(uid, 505)
+        self.assertEqual(n_before, len(self.auth.FLOWS.rows))
+
+    def test_unverified_or_wrong_password_never_logs_in(self):
+        self.start()
+        with self.assertRaises(self.auth.PhoneAuthError) as error:
+            self.auth.authenticate_password_login('+17875551234', 'LongStrongPassword!23', 'tester')
+        self.assertEqual(error.exception.status, 401)
+        flow = next(iter(self.auth.FLOWS.rows))
+        self.auth.confirm_contact(flow, 505, '+17875551234')
+        # La cuenta sigue sin existir hasta completar el registro web.
+        with self.assertRaises(self.auth.PhoneAuthError):
+            self.auth.authenticate_password_login('+17875551234', 'LongStrongPassword!23', 'tester')
+
     def test_login_must_reconfirm_telegram_user_id(self):
         flow, secret = self.start()
         self.auth.confirm_contact(flow, 505, '+17875551234')

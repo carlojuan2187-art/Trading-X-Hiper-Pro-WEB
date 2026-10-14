@@ -6,12 +6,14 @@ Las mutaciones usan replace_one con version para evitar dobles cierres/entradas.
 from __future__ import annotations
 
 from copy import deepcopy
+import logging
 from datetime import datetime, timezone
 import math
 
 from app.database import db
 from app.demo.settings import DEMO_INITIAL_EQUITY_USDC, DEMO_HISTORY_LIMIT
 
+logger = logging.getLogger(__name__)
 COLLECTION = db['demo_accounts']
 
 
@@ -74,6 +76,13 @@ def save(previous: dict, updated: dict) -> dict:
     )
     if result.modified_count != 1:
         raise Conflict('Actualización concurrente; reintentar')
+    # Se encola DESPUÉS de guardar la operación; nunca se bloquea el trade por Telegram.
+    if bool(previous.get('position')) != bool(new_doc.get('position')):
+        try:
+            from app.demo.trade_alerts import queue_transition
+            queue_transition(previous, new_doc)
+        except Exception:
+            logger.exception('DEMO trade guardado pero el aviso Telegram no pudo encolarse user=%s', previous['_id'])
     return new_doc
 
 

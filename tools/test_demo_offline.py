@@ -107,6 +107,7 @@ engine._resolve_structural_exit_plan = lambda signal, entry_price, direction, fa
 sys.modules['app.trading_engine'] = engine
 market = types.ModuleType('app.hyperliquid_client')
 market.get_best_bid_ask = lambda symbol: (100.0, 100.1)
+market.norm_coin = lambda symbol: str(symbol).strip().upper().removesuffix('-PERP').removesuffix('_PERP')
 sys.modules['app.hyperliquid_client'] = market
 pymongo = types.ModuleType('pymongo')
 pymongo_errors = types.ModuleType('pymongo.errors')
@@ -376,6 +377,52 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertEqual(runner.open_if_pending('BTC', 100, 100.1), 1)
         self.assertEqual(ledger.read(8)['position']['symbol'], 'BTC')
         self.assertEqual(runner.open_if_pending('BTC', 100, 100.1), 0)
+
+    def test_websocket_uses_exchange_coin_and_preserves_demo_perp_position(self):
+        import asyncio
+        import json
+        from app.demo.market_events import decode_book
+
+        ledger.change_status(7, active=True)
+        runner = worker.DemoMarketRunner()
+        selected = signal()
+        selected['symbol'] = 'SOL-PERP'
+        runner.pending_by_user = {7: (selected, worker.time.monotonic())}
+
+        class FakeSocket:
+            def __init__(self):
+                self.messages = []
+            async def send(self, payload):
+                self.messages.append(json.loads(payload))
+
+        socket = FakeSocket()
+        asyncio.run(runner.subscribe_new(socket))
+        self.assertEqual(socket.messages, [
+            {'method': 'subscribe', 'subscription': {'type': 'l2Book', 'coin': 'SOL'}}
+        ])
+        self.assertEqual(runner.subscribed, {'SOL'})
+
+        event = decode_book({'channel': 'l2Book', 'data': {
+            'coin': 'SOL', 'levels': [[{'px': '100'}], [{'px': '100.1'}]]}})
+        self.assertIsNotNone(event)
+        self.assertEqual(runner.open_if_pending(*event), 1)
+        self.assertEqual(ledger.read(7)['position']['symbol'], 'SOL-PERP')
+        self.assertEqual(runner.pending_by_user, {})
+
+        # The close must also use the websocket coin against the -PERP DB entry.
+        marked, closed = runner.protected_positions('SOL', 104.2, 104.3)
+        self.assertEqual(closed, 1)
+        self.assertIsNone(ledger.read(7)['position'])
+
+    def test_websocket_wrong_coin_does_not_consume_pending_signal(self):
+        ledger.change_status(8, active=True)
+        runner = worker.DemoMarketRunner()
+        selected = signal()
+        selected['symbol'] = 'SOL-PERP'
+        runner.pending_by_user = {8: (selected, worker.time.monotonic())}
+        self.assertEqual(runner.open_if_pending('BTC', 100, 100.1), 0)
+        self.assertIn(8, runner.pending_by_user)
+        self.assertIsNone(ledger.read(8)['position'])
 
     def test_expired_signal_fails_closed(self):
         ledger.change_status(7, active=True)

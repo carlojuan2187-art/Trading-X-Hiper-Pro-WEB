@@ -2,14 +2,9 @@
  * Trading overlays are read-only and never interact with order execution.
  * Frontend browser sends ONLY public Hyperliquid market subscriptions.
  */
-// Intentar KLineCharts profesional; si CDN no responde, el motor local pinta velas sin npm.
-const chartEngine = await Promise.race([
-  import('https://esm.sh/klinecharts@10.0.3?bundle').catch(() => null),
-  new Promise(resolve => setTimeout(() => resolve(null), 3000)),
-]);
-const { init, dispose, registerOverlay } = (chartEngine?.init && chartEngine?.registerOverlay)
-  ? chartEngine
-  : await import('./chart-local.js');
+// Un único motor determinista en PC y móvil: la carga CDN causaba dos APIs distintas
+// y a veces inicializaba KLineCharts, a veces el fallback incompleto.
+import { init, registerOverlay } from './chart-local.js';
 
 const WS_URL = 'wss://api.hyperliquid.xyz/ws';
 const FRAMES = {
@@ -115,6 +110,12 @@ class Terminal {
     this.book = null;
     this.trades = [];
     this.indicatorId = null;
+    this.instruments = new Set();
+    this.instrumentGeneration = 0;
+    this.quotePrice = null;
+    this.prevPrice = null;
+    this.priceSource = null;
+    this.microPending = false;
     this.subIndicatorId = null;
     this.renderShell();
     this.panel = this.root.closest('[data-panel]');
@@ -136,6 +137,11 @@ class Terminal {
     const head = el('div', 'hl-head');
     const heading = el('div', 'hl-heading');
     heading.append(el('small', 'hl-eyebrow', `${this.mode} · HYPERLIQUID`), el('h3', '', 'Terminal de mercado'));
+    const ticker = el('div','hl-ticker');
+    this.tickPrice = el('strong','hl-last-price','—');
+    this.tickArrow = el('span','hl-tick-arrow','●');
+    ticker.append(this.tickArrow,this.tickPrice);
+    heading.append(ticker);
     head.append(heading);
     const controls = el('div', 'hl-controls');
     const symbolInput = el('input', 'hl-symbol');
@@ -146,17 +152,25 @@ class Terminal {
     const suggestions = el('datalist');
     suggestions.id = `hl-symbols-${this.mode.toLowerCase()}`;
     symbolInput.setAttribute('list', suggestions.id);
-    symbolInput.addEventListener('change', () => {
+    const confirmSymbol = () => {
       const candidate = coin(symbolInput.value);
-      if (this.instruments?.has(candidate)) this.choose(candidate, false);
-      else this.notice('Busca un contrato del catálogo de Hyperliquid.', 'error');
-    });
+      if (this.instruments.has(candidate)) this.choose(candidate, false);
+      else {this.notice('Contrato no disponible: selecciona un par de la lista.', 'error');symbolInput.value=this.symbol;}
+    };
+    symbolInput.addEventListener('change', confirmSymbol);
+    symbolInput.addEventListener('keydown', event=>{if(event.key==='Enter'){event.preventDefault();confirmSymbol();symbolInput.blur();}});
+    const picker=el('div','hl-symbol-picker');
+    const results=el('div','hl-symbol-results');results.setAttribute('role','listbox');results.hidden=true;
+    picker.append(symbolInput,suggestions,results);
+    this.symbolPicker=picker;this.symbolResults=results;
+    symbolInput.addEventListener('focus',()=>this.renderSymbolResults(symbolInput.value));
+    symbolInput.addEventListener('blur',()=>setTimeout(()=>{results.hidden=true;},180));
     this.symbolInput = symbolInput;
     this.suggestions = suggestions;
     this.symbolSearchTimer = null;
     symbolInput.addEventListener('input', () => {
       clearTimeout(this.symbolSearchTimer);
-      this.symbolSearchTimer = setTimeout(() => this.loadInstruments(symbolInput.value), 250);
+      this.symbolSearchTimer = setTimeout(() => this.loadInstruments(symbolInput.value), 180);
     });
     const period = el('select', 'hl-timeframe');
     period.setAttribute('aria-label', 'Temporalidad');
@@ -178,6 +192,7 @@ class Terminal {
       if (!this.chart) return;
       if (this.indicatorId) this.chart.removeIndicator({ id: this.indicatorId });
       this.indicatorId = indicator.value === 'NONE' ? null : this.chart.createIndicator({ name: indicator.value, paneId: 'candle_pane' });
+      this.notice(`Indicador ${indicator.value} aplicado al gráfico`);
     });
     const subIndicator = el('select', 'hl-indicator');
     subIndicator.setAttribute('aria-label', 'Indicador inferior');
@@ -187,6 +202,7 @@ class Terminal {
       if (!this.chart) return;
       if (this.subIndicatorId) this.chart.removeIndicator({ id: this.subIndicatorId });
       this.subIndicatorId = this.chart.createIndicator({ name: subIndicator.value, paneId: 'hl_sub_pane' });
+      this.notice(`Panel ${subIndicator.value} activado`);
     });
     const follow = el('button', 'hl-follow', 'Ver operación');
     follow.type = 'button';
@@ -201,7 +217,13 @@ class Terminal {
       if (document.fullscreenElement) document.exitFullscreen();
       else this.root.requestFullscreen?.();
     });
-    controls.append(symbolInput, suggestions, period, indicator, subIndicator, draw, follow, fullscreen);
+    const zoomIn = el('button', 'hl-zoom', '＋'); zoomIn.type='button'; zoomIn.title='Acercar velas';
+    zoomIn.addEventListener('click',()=>this.chart?.zoom?.(-1));
+    const zoomOut = el('button', 'hl-zoom', '－'); zoomOut.type='button'; zoomOut.title='Alejar velas';
+    zoomOut.addEventListener('click',()=>this.chart?.zoom?.(1));
+    const clear = el('button', 'hl-clear', 'Borrar dibujos');clear.type='button';
+    clear.addEventListener('click',()=>this.chart?.removeOverlay({groupId:GROUPS.drawings}));
+    controls.append(picker, period, indicator, subIndicator, draw, zoomIn, zoomOut, clear, follow, fullscreen);
     head.append(controls);
     this.root.append(head);
     this.state = el('div', 'hl-state', 'Conectando datos de mercado…');
@@ -247,33 +269,50 @@ class Terminal {
   }
   async loadInstruments(search) {
     if (!this.active) return;
+    const generation=++this.instrumentGeneration;
     try {
-      const { items } = await getApi(`/api/v1/market/instruments?query=${encodeURIComponent(search)}&limit=150`);
-      this.instruments = new Set([...(this.instruments || []), ...items.map(item => item.symbol)]);
-      this.suggestions.replaceChildren(...items.map(item => {
-        const node = el('option'); node.value = item.symbol; return node;
-      }));
-    } catch (e) { this.notice(`Catálogo temporalmente no disponible: ${e.message}`, 'error'); }
+      // El catálogo es metadata, no precio: se consulta solo una vez por sesión.
+      const items=this.instrumentCache || (await getApi('/api/v1/market/instruments?limit=500')).items;
+      if (Array.isArray(items)) this.instrumentCache=items;
+      if(generation!==this.instrumentGeneration || !this.active)return;
+      if(!Array.isArray(items)) throw new Error('Catálogo inválido');
+      this.instruments=new Set(items.map(x=>x.symbol));
+      const q=coin(search); const filtered=items.filter(x=>!search || x.symbol.includes(q)).slice(0,120);
+      this.suggestions.replaceChildren(...filtered.map(item=>{const node=el('option');node.value=item.symbol;node.label=item.display||`${item.symbol}/USDC`;return node;}));
+      this.renderSymbolResults(search);
+    } catch(e){if(generation===this.instrumentGeneration) this.notice(`Catálogo no disponible: ${e.message}`,'error');}
+  }
+  renderSymbolResults(search){
+    if(!this.symbolResults||!this.instrumentCache)return;
+    const q=coin(search);
+    const choices=this.instrumentCache.filter(item=>!search||item.symbol.includes(q)).slice(0,24);
+    this.symbolResults.replaceChildren(...choices.map(item=>{
+      const choice=el('button','hl-symbol-option',item.display||`${item.symbol}/USDC`);
+      choice.type='button';choice.setAttribute('role','option');
+      choice.addEventListener('pointerdown',e=>e.preventDefault());
+      choice.addEventListener('click',()=>{this.choose(item.symbol,false);this.symbolResults.hidden=true;});
+      return choice;
+    }));
+    this.symbolResults.hidden=!choices.length||document.activeElement!==this.symbolInput;
   }
   choose(symbol, follow) {
-    if (this.instruments && !this.instruments.has(symbol)) {
-      // Server remains authoritative; this is just a temporary convenience check.
-      this.instruments.add(symbol);
-    }
+    if(!this.instruments.has(symbol) && !follow){this.notice('Contrato no disponible en el catálogo','error');return;}
+    if(!symbol || (symbol===this.symbol && !follow)) { this.symbolInput.value=this.symbol; return; }
     this.follow = follow;
     this.symbol = symbol;
     this.symbolInput.value = symbol;
-    this.book = null; this.trades = []; this.assetContext = null;
+    this.book = null; this.trades = []; this.assetContext = null; this.prevPrice=null;this.quotePrice=null;this.priceSource=null;
+    this.tickPrice.textContent='—';this.tickPrice.dataset.direction='flat';this.tickArrow.textContent='●';this.tickArrow.dataset.direction='flat';
     this.drawMicro();
     this.overlayKey = '';
     if (this.chart) this.chart.setSymbol({ ticker: symbol, pricePrecision: 6, volumePrecision: 4 });
-    this.closeSocket(); this.startSocket();
+    // setSymbol provoca unsubscribe/subscribe y abre exactamente un WebSocket.
     this.applyOverlays(); this.updateSummary();
   }
   mount() {
     try {
       this.chart = init(this.canvas, {
-        layout: { barSpaceLimit: { min: 2, max: 38 }, yAxis: { position: 'right', inside: false } },
+        layout: { barSpaceLimit: { min: 4, max: 44 }, yAxis: { position: 'right', inside: false } },
         styles: {
           grid: { horizontal: { show: true, color: '#17303b', style: 'dashed', dashedValue: [3, 4] },
             vertical: { show: true, color: '#112631', style: 'dashed', dashedValue: [3, 4] } },
@@ -294,8 +333,7 @@ class Terminal {
         subscribeBar: ({ symbol, period, callback }) => {
           this.currentCallback = callback;
           this.currentBarKey = `${coin(symbol.ticker)}|${frame(period)}`;
-          this.closeSocket();
-          this.startSocket();
+          this.closeSocket(); this.startSocket();
         },
         unsubscribeBar: () => { this.currentCallback = null; this.currentBarKey = null; this.closeSocket(); },
       });
@@ -317,7 +355,7 @@ class Terminal {
         if (epoch !== this.wsGeneration || !this.active) return;
         if (Array.isArray(book.bids) && Array.isArray(book.asks)) {
           this.book = book;
-          this.drawMicro();
+          this.scheduleMicro();
         }
       }).catch(() => {});
     this.notice('Conectando WebSocket público de Hyperliquid…');
@@ -343,16 +381,19 @@ class Terminal {
           const current = packet.data;
           if (coin(current?.s) !== wantedSymbol || current?.i !== wantedFrame) return;
           const item = bar(current);
-          if (item && this.currentBarKey === `${wantedSymbol}|${wantedFrame}`) this.currentCallback?.(item);
+          if (item && this.currentBarKey === `${wantedSymbol}|${wantedFrame}`) {
+            this.paintTick(item.close,'candle');this.currentCallback?.(item);
+          }
         } else if (packet.channel === 'l2Book' && coin(packet.data?.coin) === wantedSymbol) {
           this.readBook(packet.data);
           this.updateSummary();
         } else if (packet.channel === 'trades') {
           const rows = (Array.isArray(packet.data) ? packet.data : []).filter(t => coin(t.coin) === wantedSymbol);
-          this.trades = [...rows, ...this.trades].slice(0, 16); this.drawMicro();
+          this.trades = [...rows, ...this.trades].slice(0, 20); this.scheduleMicro();
+          const newest=rows[rows.length-1];if(newest) this.paintTick(Number(newest.px),'trade');
         } else if (packet.channel === 'activeAssetCtx' && coin(packet.data?.coin) === wantedSymbol) {
           this.assetContext = packet.data?.ctx || {};
-          this.updateSummary();
+          this.paintTick(this.assetContext?.markPx,'mark'); this.updateSummary();
         }
       } catch { /* Drop malformed public frames, never inject HTML */ }
     };
@@ -377,31 +418,61 @@ class Terminal {
   readBook(raw) {
     const levels = raw?.levels;
     if (!Array.isArray(levels) || levels.length < 2) return;
-    const valid = items => (Array.isArray(items) ? items : []).slice(0, 10).map(p => ({
+    const valid = items => (Array.isArray(items) ? items : []).slice(0, 20).map(p => ({
       price: num(p.px), quantity: num(p.sz),
     })).filter(p => p.price && p.quantity);
-    this.book = { bids: valid(levels[0]), asks: valid(levels[1]) };
+    this.book = { bids: valid(levels[0]).sort((a,b)=>b.price-a.price), asks: valid(levels[1]).sort((a,b)=>a.price-b.price) };
     const bid = this.book.bids[0]?.price, ask = this.book.asks[0]?.price;
     if (bid > 0 && ask >= bid) window.dispatchEvent(new CustomEvent('hl:market-quote', {
       detail: { symbol: this.symbol, bid, ask }
     }));
-    this.drawMicro();
+    this.scheduleMicro();
+  }
+  paintTick(value,source='mark'){
+    const p=num(value);if(!p)return;
+    // No comparar fuentes distintas (mark / candle / trade): darían falsas flechas.
+    const rank={mark:1,candle:2,trade:3};
+    if(this.priceSource && rank[source]<rank[this.priceSource])return;
+    const previous=this.priceSource===source?this.quotePrice:null;
+    this.prevPrice=previous;this.quotePrice=p;this.priceSource=source;
+    this.tickPrice.textContent=fmt(p,7);
+    const direction=previous===null? 'flat' :p>previous?'up':p<previous?'down':this.tickPrice.dataset.direction||'flat';
+    this.tickPrice.dataset.direction=direction;this.tickArrow.dataset.direction=direction;
+    this.tickArrow.textContent=direction==='up'?'▲':direction==='down'?'▼':'●';
+  }
+  scheduleMicro(){
+    if(this.microPending)return;this.microPending=true;
+    requestAnimationFrame(()=>{this.microPending=false;this.drawMicro();});
   }
   drawMicro() {
     const book = this.book || { bids: [], asks: [] };
     this.bookNode.replaceChildren();
     if (!book.asks.length && !book.bids.length) this.bookNode.append(el('p', 'hl-empty', 'Esperando libro…'));
-    for (const [side, rows] of [['ASK', book.asks], ['BID', book.bids]]) {
-      rows.forEach(item => {
-        const row = el('div', `hl-row ${side.toLowerCase()}`);
-        row.append(el('span', '', side), el('span', '', fmt(item.price, 7)), el('span', '', fmt(item.quantity, 4)));
-        this.bookNode.append(row);
+    const asks=(book.asks||[]).slice(0,12).sort((a,b)=>b.price-a.price);
+    const bids=(book.bids||[]).slice(0,12).sort((a,b)=>b.price-a.price);
+    const total=(arr)=>arr.reduce((sum,x)=>sum+(num(x.quantity)||0),0);
+    const maxDepth=Math.max(1,total(asks),total(bids));
+    for(const [side,rows] of [['ASK',asks],['BID',bids]]){
+      // El lado ASK se muestra por encima del spread, el BID por debajo.
+      let cumulative=0;
+      const rendered=rows.map(item=>{
+        cumulative+=(num(item.quantity)||0);
+        const row=el('div',`hl-row hl-depth ${side.toLowerCase()}`);
+        row.style.setProperty('--depth',`${Math.max(0,Math.min(100,cumulative/maxDepth*100)).toFixed(1)}%`);
+        row.append(el('span','',side),el('span','',fmt(item.price,7)),el('span','',fmt(item.quantity,4)));
+        return row;
       });
+      this.bookNode.append(...rendered);
+      if(side==='ASK'&&asks.length&&bids.length){
+        const spread=el('div','hl-spread');
+        spread.append(el('span','',`Spread ${fmt(asks[asks.length-1].price-bids[0].price,7)}`),el('strong','',`Bid ${fmt(bids[0].price,7)} / Ask ${fmt(asks[asks.length-1].price,7)}`));
+        this.bookNode.append(spread);
+      }
     }
     this.tradesNode.replaceChildren();
     if (!this.trades.length) this.tradesNode.append(el('p', 'hl-empty', 'Esperando ejecuciones…'));
     for (const trade of this.trades) {
-      const row = el('div', 'hl-row');
+      const row = el('div', `hl-row hl-trade ${trade.side === 'B' ? 'bid' : 'ask'}`);
       row.append(el('span', '', trade.side === 'B' ? 'BUY' : 'SELL'),
         el('span', '', fmt(trade.px, 7)), el('span', '', fmt(trade.sz, 4)));
       this.tradesNode.append(row);

@@ -30,3 +30,35 @@
 .hl-terminal:fullscreen .hl-canvas{height:65vh}
 @media(max-width:760px){.hl-terminal{padding:8px;border-radius:11px}.hl-heading h3{font-size:17px;margin-bottom:5px}.hl-head{display:block}.hl-controls{gap:5px}.hl-controls :is(input,select,button){font-size:11px;min-height:35px;flex:1 1 78px;max-width:none}.hl-canvas{height:350px}.hl-micro{grid-template-columns:1fr}.hl-summary-item{min-width:90px;flex:1 1 100px}}
 @media(max-width:400px){.hl-canvas{height:300px}.hl-controls :is(input,select,button){flex:1 1 96px}}
+
+/* Terminal v2: velas legibles, cotización por tick y profundidad bid/ask. */
+.hl-heading{display:flex;flex-direction:column;gap:3px}
+.hl-ticker{display:flex;align-items:center;gap:7px;font:700 20px/1.2 'JetBrains Mono',monospace;margin:0 0 8px}
+.hl-last-price{color:#bdd2d9;transition:color .12s ease}
+.hl-last-price[data-direction="up"],.hl-tick-arrow[data-direction="up"]{color:#0fe3a1}
+.hl-last-price[data-direction="down"],.hl-tick-arrow[data-direction="down"]{color:#ff5b7a}
+.hl-tick-arrow{font-size:13px;color:#7fa1ad}
+.hl-controls input{width:145px;max-width:190px}
+.hl-controls .hl-zoom{min-width:35px;font-size:17px;max-width:44px}
+.hl-controls .hl-clear{white-space:nowrap}
+.hl-canvas{height:500px;min-height:340px}
+.hl-local-chart{cursor:crosshair}
+.hl-row.hl-depth{position:relative;isolation:isolate;border-bottom:1px solid #16313b;min-height:27px;align-items:center;padding:5px 3px}
+.hl-row.hl-depth::before{content:"";position:absolute;inset:1px auto 1px 0;width:var(--depth,0%);z-index:-1;opacity:.60;pointer-events:none}
+.hl-row.hl-depth.ask::before{background:linear-gradient(90deg,rgba(254,76,106,.05),rgba(254,76,106,.35));border-right:2px solid #ff5676}
+.hl-row.hl-depth.bid::before{background:linear-gradient(90deg,rgba(6,220,144,.05),rgba(6,220,144,.34));border-right:2px solid #16e7a0}
+.hl-row.hl-depth.ask span:nth-child(2){color:#ff8296}
+.hl-row.hl-depth.bid span:nth-child(2){color:#1ae5a1}
+.hl-spread{display:flex;justify-content:space-between;align-items:center;gap:5px;padding:9px 3px;border-top:1px solid #31505d;border-bottom:1px solid #31505d;color:#9ab9c6;font:10px 'JetBrains Mono',monospace}
+.hl-spread strong{color:#e6fbfd;font-size:10px}
+.hl-trade.ask{color:#ff839a}.hl-trade.bid{color:#1ee9ad}
+@media(max-width:760px){.hl-canvas{height:390px;min-height:390px}.hl-controls input{flex:2 1 115px;max-width:none}.hl-controls .hl-zoom{flex:0 1 43px}.hl-spread{font-size:9px;flex-wrap:wrap}.hl-heading h3{margin-bottom:2px}}
+@media(max-width:400px){.hl-canvas{height:365px;min-height:365px}}
+
+.hl-symbol-picker{position:relative;flex:0 1 172px;min-width:125px;z-index:20}
+.hl-controls .hl-symbol-picker input{width:100%;max-width:none}
+.hl-symbol-results{position:absolute;top:calc(100% + 4px);left:0;width:min(270px,78vw);max-height:275px;overflow-y:auto;background:#0a2430;border:1px solid #2d5969;border-radius:9px;box-shadow:0 10px 28px #000b;z-index:80;padding:4px}
+.hl-symbol-results[hidden]{display:none}
+.hl-controls .hl-symbol-option{display:block;width:100%;max-width:none;text-align:left;background:transparent;border:0;border-radius:5px;padding:8px 10px;min-height:32px;font:600 12px/1.3 Inter,sans-serif;color:#d8f4fc}
+.hl-controls .hl-symbol-option:hover,.hl-controls .hl-symbol-option:focus{background:#164b5b;color:#fff}
+@media(max-width:760px){.hl-symbol-picker{flex:2 1 145px;min-width:130px}}

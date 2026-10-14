@@ -1835,7 +1835,7 @@ function initPhoneAuth() {
     $('phonePasswordConfirmBox').classList.toggle('hidden', mode !== 'register');
     pwd.autocomplete = mode === 'register' ? 'new-password' : 'current-password';
     confirm.required = mode === 'register';
-    submit.textContent = mode === 'register' ? 'Crear cuenta y verificar' : 'Continuar con Telegram';
+    submit.textContent = mode === 'register' ? 'Crear cuenta y verificar' : 'Iniciar sesión';
     phoneMessage('');
   };
   tabs.login.addEventListener('click', () => setMode('login'));
@@ -1862,12 +1862,20 @@ function initPhoneAuth() {
     const national = $('phoneNumber').value.trim();
     const phone = national.startsWith('+') ? national : dialValue + national.replace(/[^\d]/g, '');
     submit.disabled = true;
-    phoneMessage('Preparando verificación segura...');
+    phoneMessage(phoneMode === 'register' ? 'Preparando verificación segura...' : 'Verificando credenciales...');
     try {
       const ref = new URLSearchParams(location.search).get('ref') || '';
       const response = await apiFetch('/api/v1/auth/phone/start', {
         method: 'POST', body: JSON.stringify({mode: phoneMode, phone, password: pwd.value, referrer: ref}),
       });
+      if (response.authenticated) {
+        sessionStorage.removeItem('hl_phone_flow');
+        sessionStorage.removeItem('hl_phone_bot_url');
+        pwd.value = '';
+        confirm.value = '';
+        window.location.assign('/');
+        return;
+      }
       phoneFlowId = response.flow_id;
       sessionStorage.setItem('hl_phone_flow', phoneFlowId);
       sessionStorage.setItem('hl_phone_bot_url', response.telegram_url);

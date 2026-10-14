@@ -4468,8 +4468,12 @@ def _select_best_signal_from_scanner_shortlist(user_id: int, exclude_symbols: se
                 adx_period=ADX_PERIOD,
                 atr_period=ATR_PERIOD,
             )
+            # Modo de evaluación explícito, aislado: sólo DEMO usa la prueba H1/M15.
+            # No modificar el snapshot cacheado del proveedor de mercado.
+            strategy_ctx = dict(symbol_ctx)
+            strategy_ctx["_execution_mode"] = "demo" if execution_mode == "demo" else "live"
             symbol_eval_started_ts = time.time()
-            signal = get_entry_signal(symbol, market_context=symbol_ctx, btc_context=btc_context)
+            signal = get_entry_signal(symbol, market_context=strategy_ctx, btc_context=btc_context)
             symbol_eval_elapsed_s = time.time() - symbol_eval_started_ts
             if symbol_eval_elapsed_s >= float(SLOW_SYMBOL_EVAL_SECONDS) and len(slow_samples) < 6:
                 slow_samples.append(f"{symbol}:{symbol_eval_elapsed_s:.2f}s")

@@ -67,7 +67,10 @@ def get_entry_signal(symbol: str, market_context: Optional[Dict[str, Any]] = Non
         return tf.get('last_close_t') or tf.get('last_t')
     symbol_bar, btc_bar = stamp(ctx), stamp(btc)
     # A new wall-clock bucket forces refresh even if one upstream feed lags.
-    key = (symbol_bar, btc_bar, int(time.time() // 300)) if symbol_bar and btc_bar else None
+    # El mismo par/barra puede tener resultados distintos entre DEMO experimental
+    # y LIVE; una decisión cacheada nunca debe filtrarse de un modo al otro.
+    mode = "demo" if ctx.get("_execution_mode") == "demo" else "live"
+    key = (mode, symbol_bar, btc_bar, int(time.time() // 300)) if symbol_bar and btc_bar else None
     out = _SIGNAL_CACHE.evaluate(str(symbol).upper(), key,
         lambda: _router().route_symbol(symbol, market_context=ctx, btc_context=btc))
     if isinstance(out, dict) and out.get("signal"):

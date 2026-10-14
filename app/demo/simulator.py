@@ -11,12 +11,7 @@ from copy import deepcopy
 from decimal import Decimal, ROUND_DOWN
 from typing import Any
 
-from app.config import (
-    LEVERAGE, EXECUTION_MAX_SPREAD_BPS, MAX_TRADES_PER_DAY, MAX_TRADES_PER_HOUR,
-    USER_RISK_MAX_CONSEC_LOSSES, USER_RISK_COOLDOWN_SECONDS,
-    USER_RISK_LOSS_COOLDOWN_SECONDS, USER_RISK_PF_WINDOW,
-    USER_RISK_MIN_PF, USER_RISK_PF_COOLDOWN_SECONDS,
-)
+from app.config import LEVERAGE, EXECUTION_MAX_SPREAD_BPS
 from app.demo.ledger import append_close, now_iso
 from app.demo.settings import DEMO_SLIPPAGE_BPS, DEMO_TAKER_FEE_BPS
 from app.risk import validate_trade_conditions
@@ -54,46 +49,18 @@ def fee_usdc(notional: float) -> float:
 
 
 def entry_gate_reason(account: dict, *, now: datetime | None = None) -> str | None:
-    """Control DEMO persistente por usuario equivalente a cuotas/cooldown LIVE.
+    """Solo restricciones operativas esenciales para experimentos DEMO.
 
-    No lee el estado LIVE ni toca sus gobernadores globales. Esta función se
-    ejecuta antes del scanner y de nuevo justo antes de ejecutar una señal.
+    No aplica límites por hora/día, cooldown temporal tras cierres ni bloqueos
+    por pérdidas, rachas o profit factor. LIVE conserva sus propios gobernadores.
+    Se valida antes del scanner y otra vez antes de cada entrada simulada.
     """
     if not account.get('enabled') or account.get('position'):
         return 'NOT_ELIGIBLE'
-    now = now or datetime.now(timezone.utc)
-    try:
-        until = datetime.fromisoformat(str(account.get('risk_cooldown_until')))
-        until = until if until.tzinfo else until.replace(tzinfo=timezone.utc)
-        if now < until:
-            return 'RISK_COOLDOWN'
-    except (ValueError, TypeError):
-        pass
     from app import trading_engine as engine
     if float(account.get('balance_usdc') or 0) < float(engine.MIN_CAPITAL_USDC):
         return 'MIN_CAPITAL'
-    try:
-        last = datetime.fromisoformat(str(account.get('last_entry_at') or account.get('last_close_at')))
-        if last.tzinfo is None:
-            last = last.replace(tzinfo=timezone.utc)
-        if (now - last).total_seconds() < engine.USER_TRADE_COOLDOWN_SECONDS:
-            return 'TRADE_COOLDOWN'
-    except (ValueError, TypeError):
-        pass
-    recent = account.get('entry_timestamps') or []
-    parsed = []
-    for ts in recent:
-        try:
-            t = datetime.fromisoformat(str(ts))
-            parsed.append(t if t.tzinfo else t.replace(tzinfo=timezone.utc))
-        except (ValueError, TypeError):
-            continue
-    if MAX_TRADES_PER_HOUR is not None and sum(t >= now - timedelta(hours=1) for t in parsed) >= MAX_TRADES_PER_HOUR:
-        return 'MAX_TRADES_PER_HOUR'
-    if MAX_TRADES_PER_DAY is not None and sum(t.date() == now.date() for t in parsed) >= MAX_TRADES_PER_DAY:
-        return 'MAX_TRADES_PER_DAY'
     return None
-
 
 def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict | None:
     """Evalúa riesgo, drift y SL/TP ESTRUCTURAL con las funciones originales.
@@ -118,7 +85,7 @@ def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict
     balance = float(account['balance_usdc'])
     if balance < float(engine.MIN_CAPITAL_USDC):
         return None
-    # La política de cuotas y cooldown ya se comprueba en entry_gate_reason.
+    # Validación de capital, posición y señal, sin cuotas ni pausas temporales DEMO.
     risk = validate_trade_conditions(balance, float(selected.get('strength') or 0))
     if not risk.get('ok'):
         return None
@@ -180,6 +147,9 @@ def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict
     updated['last_signal_at'] = now_iso()
     updated['last_entry_at'] = now_iso()
     updated['entry_timestamps'] = [x for x in (account.get('entry_timestamps') or []) if isinstance(x, str) and x >= (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()] + [now_iso()]
+    # Eliminar advertencias de pausas heredadas: la nueva política DEMO no las usa.
+    updated['risk_cooldown_until'] = None
+    updated['risk_cooldown_reason'] = None
     updated['last_error'] = None
     return updated
 
@@ -224,31 +194,10 @@ def update_position(account: dict, bid: float, ask: float) -> dict | None:
     updated['position_open'] = False
     updated['last_close_at'] = now_iso()
     append_close(updated, closed)
-    # Refleja los bloqueos por pérdida/racha/PF individuales de LIVE.
-    # Nunca escribe ni lee el gobernador de riesgo LIVE de otras cuentas.
+    # La racha sigue siendo una métrica para la auditoría, no un bloqueo DEMO.
     consecutive = int(updated.get('risk_consecutive_losses') or 0) + 1 if net_open < 0 else 0
     updated['risk_consecutive_losses'] = consecutive
-    cooldown = USER_RISK_LOSS_COOLDOWN_SECONDS if net_open < 0 else 0
-    reason = 'USER_SINGLE_LOSS_COOLDOWN' if net_open < 0 else None
-    if consecutive >= USER_RISK_MAX_CONSEC_LOSSES:
-        cooldown = max(cooldown, USER_RISK_COOLDOWN_SECONDS)
-        reason = f'USER_CONSEC_LOSSES_{consecutive}'
-    else:
-        recent_pnl = [float(t['pnl_net_usdc']) for t in updated['history'][-USER_RISK_PF_WINDOW:]]
-        if USER_RISK_PF_WINDOW > 0 and len(recent_pnl) >= USER_RISK_PF_WINDOW:
-            gains = sum(p for p in recent_pnl if p > 0)
-            losses = sum(-p for p in recent_pnl if p < 0)
-            pf = gains / losses if losses > 0 else float('inf') if gains > 0 else 0.0
-            if pf < USER_RISK_MIN_PF:
-                cooldown = max(cooldown, USER_RISK_PF_COOLDOWN_SECONDS)
-                reason = f'USER_PF_{pf:.2f}_WIN{USER_RISK_PF_WINDOW}'
-    if cooldown > 0:
-        until = datetime.now(timezone.utc) + timedelta(seconds=cooldown)
-        try:
-            old_until = datetime.fromisoformat(str(updated.get('risk_cooldown_until')))
-            until = max(until, old_until if old_until.tzinfo else old_until.replace(tzinfo=timezone.utc))
-        except (ValueError, TypeError):
-            pass
-        updated['risk_cooldown_until'] = until.isoformat()
-        updated['risk_cooldown_reason'] = reason
+    # Limpiar bloqueos antiguos persistidos de versiones anteriores.
+    updated['risk_cooldown_until'] = None
+    updated['risk_cooldown_reason'] = None
     return updated

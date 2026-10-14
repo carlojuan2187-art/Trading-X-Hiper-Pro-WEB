@@ -26,16 +26,19 @@ class FakeCollection:
 
     def _matches(self, doc, query):
         for k, v in query.items():
+            nested = doc
+            for part in k.split('.'):
+                nested = nested.get(part) if isinstance(nested, dict) else None
             if k == '$or':
                 if not any(self._matches(doc, q) for q in v):
                     return False
             elif isinstance(v, dict) and '$ne' in v:
-                if doc.get(k) == v['$ne']:
+                if nested == v['$ne']:
                     return False
             elif isinstance(v, dict) and '$lte' in v:
-                if doc.get(k) is None or doc[k] > v['$lte']:
+                if nested is None or nested > v['$lte']:
                     return False
-            elif doc.get(k) != v:
+            elif nested != v:
                 return False
         return True
 
@@ -73,6 +76,7 @@ db = {'demo_accounts': fake_accounts, 'demo_worker_leases': fake_leases}
 
 db_module = types.ModuleType('app.database')
 db_module.db = db
+db_module.touch_runtime_component = lambda *args, **kwargs: None
 sys.modules['app.database'] = db_module
 config_module = types.ModuleType('app.config')
 for k, v in {
@@ -157,6 +161,54 @@ class DemoOfflineTests(unittest.TestCase):
         ledger.change_status(7, active=True)
         self.assertFalse(ledger.read(8)['enabled'])
 
+    def test_demo_capital_configurable_independent_per_user(self):
+        a = ledger.configure_initial_capital(7, 250.50)
+        self.assertEqual(a['initial_equity_usdc'], 250.50)
+        self.assertEqual(a['balance_usdc'], 250.50)
+        self.assertEqual(ledger.get_or_create(8)['balance_usdc'], 100.0)
+        reset = ledger.reset(7)
+        self.assertEqual(reset['balance_usdc'], 250.50)
+        self.assertEqual(reset['initial_equity_usdc'], 250.50)
+        self.assertEqual(reset['version'], a['version'] + 1)
+
+    def test_demo_capital_validation_and_history_guard(self):
+        for invalid in (-1, 0, 9, 100001, float('nan'), float('inf'), 100.005, True):
+            with self.assertRaises(ValueError):
+                ledger.configure_initial_capital(7, invalid)
+        ledger.configure_initial_capital(7, 300)
+        ledger.change_status(7, active=True)
+        with self.assertRaises(ValueError):
+            ledger.configure_initial_capital(7, 400)
+        # La posición se abre con el worker activo; al pausar, se sigue
+        # gestionando para cerrar en TP/SL, pero no permite cambiar capital.
+        opened = simulator.open_position(ledger.read(7), signal(), 100, 100.1)
+        self.assertIsNotNone(opened)
+        ledger.save(ledger.read(7), opened)
+        ledger.change_status(7, active=False)
+        with self.assertRaises(ValueError):
+            ledger.configure_initial_capital(7, 400)
+        closed = simulator.update_position(ledger.read(7), 104.2, 104.3)
+        ledger.save(ledger.read(7), closed)
+        with self.assertRaises(ValueError):
+            ledger.configure_initial_capital(7, 400)
+        self.assertEqual(ledger.read(7)['trades_closed'], 1)
+        ledger.reset(7)
+        self.assertEqual(ledger.configure_initial_capital(7, 400)['balance_usdc'], 400)
+
+    def test_capital_api_authenticated_and_prevents_cross_user_change(self):
+        app = FastAPI()
+        app.include_router(demo_router)
+        client = TestClient(app)
+        self.assertEqual(client.post('/api/v1/demo/capital', json={'capital_usdc': 250}).status_code, 401)
+        app.dependency_overrides[_require_session_stub] = lambda: {'user_id': 7}
+        self.assertEqual(client.post('/api/v1/demo/capital', json={'capital_usdc': 250}).status_code, 200)
+        self.assertEqual(client.get('/api/v1/demo').json()['initial_equity_usdc'], 250)
+        self.assertIsNone(ledger.read(8))
+        self.assertEqual(client.post('/api/v1/demo/capital', json={'capital_usdc': 1000001}).status_code, 422)
+        app.dependency_overrides[_require_session_stub] = lambda: {'user_id': 8}
+        self.assertEqual(client.get('/api/v1/demo').json()['initial_equity_usdc'], 100)
+        self.assertEqual(ledger.read(7)['initial_equity_usdc'], 250)
+
     def test_long_full_lifecycle_with_net_fees(self):
         acc = ledger.change_status(7, active=True)
         opened = simulator.open_position(acc, signal(), 100, 100.1)
@@ -214,6 +266,131 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertFalse(reset['enabled'])
         self.assertEqual(reset['balance_usdc'], 100)
         self.assertEqual(reset['trades_closed'], 0)
+
+    def test_demo_selects_an_independent_strategy_per_user(self):
+        ledger.change_status(7, active=True)
+        ledger.change_status(8, active=True)
+        called = []
+        def choose(uid):
+            called.append(uid)
+            chosen = signal('long' if uid == 7 else 'short')
+            chosen['symbol'] = 'SOL' if uid == 7 else 'BTC'
+            return chosen
+        results = worker.tick(do_scan=True, selector=choose, quote_provider=lambda _: (100, 100.1))
+        self.assertEqual(set(called), {7, 8})
+        self.assertEqual(results['opened'], 2)
+        self.assertEqual(ledger.read(7)['position']['symbol'], 'SOL')
+        self.assertEqual(ledger.read(8)['position']['symbol'], 'BTC')
+        self.assertEqual(ledger.read(7)['position']['direction'], 'long')
+        self.assertEqual(ledger.read(8)['position']['direction'], 'short')
+
+    def test_pending_signals_are_user_scoped_and_symbol_scoped(self):
+        ledger.change_status(7, active=True)
+        ledger.change_status(8, active=True)
+        runner = worker.DemoMarketRunner()
+        now = worker.time.monotonic()
+        first, second = signal(), signal('short')
+        second['symbol'] = 'BTC'
+        runner.pending_by_user = {7: (first, now), 8: (second, now)}
+        self.assertEqual(runner.open_if_pending('SOL', 100, 100.1), 1)
+        self.assertIsNotNone(ledger.read(7)['position'])
+        self.assertIsNone(ledger.read(8)['position'])
+        self.assertIn(8, runner.pending_by_user)
+        self.assertEqual(runner.open_if_pending('BTC', 100, 100.1), 1)
+        self.assertEqual(ledger.read(8)['position']['symbol'], 'BTC')
+        self.assertEqual(runner.open_if_pending('BTC', 100, 100.1), 0)
+
+    def test_expired_signal_fails_closed(self):
+        ledger.change_status(7, active=True)
+        runner = worker.DemoMarketRunner()
+        runner.pending_by_user = {7: (signal(), worker.time.monotonic() - 31)}
+        self.assertEqual(runner.open_if_pending('SOL', 100, 100.1), 0)
+        self.assertIsNone(ledger.read(7)['position'])
+        self.assertEqual(runner.pending_by_user, {})
+
+    def test_paused_or_risk_blocked_account_never_executes_pending_signal(self):
+        ledger.change_status(7, active=True)
+        runner = worker.DemoMarketRunner()
+        runner.pending_by_user = {7: (signal(), worker.time.monotonic())}
+        ledger.change_status(7, active=False)
+        self.assertEqual(runner.open_if_pending('SOL', 100, 100.1), 0)
+        self.assertIsNone(ledger.read(7)['position'])
+        account = ledger.change_status(7, active=True)
+        account['risk_cooldown_until'] = '2099-01-01T00:00:00+00:00'
+        ledger.save(ledger.read(7), account)
+        self.assertEqual(simulator.entry_gate_reason(ledger.read(7)), 'RISK_COOLDOWN')
+        runner.pending_by_user = {7: (signal(), worker.time.monotonic())}
+        self.assertEqual(runner.open_if_pending('SOL', 100, 100.1), 0)
+
+    def test_deep_scan_is_per_user_and_rotates_fairly(self):
+        for uid in range(1, 9):
+            ledger.change_status(uid, active=True)
+        seen = []
+        def selector(uid, excluded, *, execution_mode):
+            self.assertEqual(execution_mode, 'demo')
+            seen.append(uid)
+            return None
+        with patch.object(engine, '_select_best_signal_from_scanner_shortlist', side_effect=selector, create=True):
+            runner = worker.DemoMarketRunner()
+            runner.select_signal()
+            runner.select_signal()
+        self.assertEqual(seen, [1, 2, 3, 4, 5, 6, 7, 8, 1, 2])
+
+    def test_strategy_metrics_are_net_and_scoped_to_demo_history(self):
+        result = ledger.recent_strategy_metrics([
+            {'strategy_id': 'breakout', 'pnl_net_usdc': 1.5},
+            {'strategy_id': 'breakout', 'pnl_net_usdc': -1},
+            {'strategy_id': 'sweep', 'pnl_net_usdc': -0.5},
+        ])
+        breakout = next(row for row in result if row['strategy_id'] == 'breakout')
+        self.assertEqual(breakout['trades'], 2)
+        self.assertEqual(breakout['win_rate_pct'], 50.0)
+        self.assertAlmostEqual(breakout['net_pnl_usdc'], 0.5)
+        self.assertEqual(breakout['profit_factor'], 1.5)
+        self.assertEqual(ledger.as_public(ledger.get_or_create(7))['strategy_metrics_scope'], 'retained_demo_history_only')
+
+    def test_slow_scanner_does_not_block_websocket_stop_loss(self):
+        import asyncio
+        import json
+        import time
+        import websockets
+        acc = ledger.change_status(7, active=True)
+        opened = simulator.open_position(acc, signal(), 100, 100.1)
+        ledger.save(acc, opened)
+        class StopSocket(Exception):
+            pass
+        class FakeWebsocket:
+            def __init__(self):
+                self.calls = 0
+                self.messages = []
+            async def send(self, data):
+                self.messages.append(json.loads(data))
+            async def recv(self):
+                self.calls += 1
+                if self.calls == 1:
+                    await asyncio.sleep(.025)
+                    return json.dumps({'channel': 'l2Book', 'data': {'coin': 'SOL',
+                            'levels': [[{'px': '104.2'}], [{'px': '104.3'}]]}})
+                raise StopSocket()
+        class FakeConnect:
+            async def __aenter__(self):
+                return FakeWebsocket()
+            async def __aexit__(self, *args):
+                return False
+        runner = worker.DemoMarketRunner()
+        def slow_scan():
+            time.sleep(.35)
+            return {}, 0
+        runner.collect_signals = slow_scan
+        start = time.monotonic()
+        with patch.object(websockets, 'connect', return_value=FakeConnect()), \
+             patch.object(worker, 'acquire_lease', return_value=True):
+            with self.assertRaises(StopSocket):
+                asyncio.run(runner.run_socket())
+        # El SL/TP se procesó antes de que terminase el scanner costoso.
+        # asyncio.run espera a cerrar el threadpool: comprobamos el hecho,
+        # no el tiempo total del proceso.
+        self.assertEqual(ledger.read(7)['trades_closed'], 1)
 
     def test_worker_uses_injected_market_and_selector_without_live_orders(self):
         ledger.change_status(7, active=True)

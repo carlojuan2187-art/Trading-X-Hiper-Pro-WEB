@@ -72,7 +72,9 @@ class FakeCollection:
 
 fake_accounts = FakeCollection()
 fake_leases = FakeCollection()
-db = {'demo_accounts': fake_accounts, 'demo_worker_leases': fake_leases}
+fake_outbox = FakeCollection()
+db = {'demo_accounts': fake_accounts, 'demo_worker_leases': fake_leases,
+      'telegram_trade_outbox': fake_outbox}
 
 db_module = types.ModuleType('app.database')
 db_module.db = db
@@ -152,6 +154,81 @@ class DemoOfflineTests(unittest.TestCase):
     def setUp(self):
         fake_accounts.rows.clear()
         fake_leases.rows.clear()
+        fake_outbox.rows.clear()
+
+    def test_trade_notifications_queued_once_to_owner_after_save(self):
+        from app.demo import trade_alerts
+        acc = ledger.change_status(7, active=True)
+        opened = simulator.open_position(acc, signal(), 100, 100.1)
+        self.assertIsNotNone(opened)
+        ledger.save(acc, opened)
+        open_events = list(fake_outbox.rows.values())
+        self.assertEqual(len(open_events), 1)
+        self.assertEqual(open_events[0]['chat_id'], 7)
+        self.assertEqual(open_events[0]['event'], 'OPEN')
+        self.assertIn('SL:', open_events[0]['text'])
+        self.assertNotIn('private_key', open_events[0]['text'])
+        trade_alerts.queue_transition(acc, opened)
+        self.assertEqual(len(fake_outbox.rows), 1)
+        closed = simulator.update_position(ledger.read(7), 104.2, 104.3)
+        ledger.save(ledger.read(7), closed)
+        self.assertEqual(len(fake_outbox.rows), 2)
+        close_events = [v for v in fake_outbox.rows.values() if v['event'] == 'CLOSE']
+        self.assertEqual(close_events[0]['chat_id'], 7)
+        self.assertIn('PnL neto', close_events[0]['text'])
+        trade_alerts.queue_transition(opened, closed)
+        self.assertEqual(len(fake_outbox.rows), 2)
+
+    def test_telegram_dispatch_delivers_only_to_owner(self):
+        import asyncio
+        from app.demo import trade_alerts
+        error_mod = types.ModuleType('telegram.error')
+        error_mod.Forbidden = type('Forbidden', (Exception,), {})
+        error_mod.TelegramError = type('TelegramError', (Exception,), {})
+        telegram_mod = types.ModuleType('telegram')
+        with patch.dict(sys.modules, {'telegram': telegram_mod, 'telegram.error': error_mod}):
+            acc = ledger.change_status(7, active=True)
+            opened = simulator.open_position(acc, signal(), 100, 100.1)
+            ledger.save(acc, opened)
+            event = list(fake_outbox.rows.values())[0]
+            sent, marked = [], []
+            class Bot:
+                async def send_message(self, *, chat_id, text):
+                    sent.append((chat_id, text))
+            with patch.object(trade_alerts, '_claim_next', side_effect=[event, None]), \
+                 patch.object(trade_alerts, '_mark_sent', side_effect=lambda x: marked.append(x)):
+                count = asyncio.run(trade_alerts.dispatch_batch(Bot(), limit=3))
+            self.assertEqual(count, 1)
+            self.assertEqual(sent[0][0], 7)
+            self.assertIn('Operación abierta', sent[0][1])
+            self.assertEqual(marked, [event['_id']])
+
+    def test_telegram_transient_failure_schedules_retry(self):
+        import asyncio
+        from app.demo import trade_alerts
+        error_mod = types.ModuleType('telegram.error')
+        error_mod.Forbidden = type('Forbidden', (Exception,), {})
+        error_mod.TelegramError = type('TelegramError', (Exception,), {})
+        telegram_mod = types.ModuleType('telegram')
+        with patch.dict(sys.modules, {'telegram': telegram_mod, 'telegram.error': error_mod}):
+            event = {'_id': 'demo:7:t1:open', 'chat_id': 7, 'text': 'open', 'attempts': 1}
+            failed = []
+            class Bot:
+                async def send_message(self, *, chat_id, text):
+                    raise error_mod.TelegramError('network unavailable')
+            with patch.object(trade_alerts, '_claim_next', side_effect=[event, None]), \
+                 patch.object(trade_alerts, '_mark_failure', side_effect=lambda *args: failed.append(args)):
+                count = asyncio.run(trade_alerts.dispatch_batch(Bot(), limit=3))
+            self.assertEqual(count, 0)
+            self.assertEqual(failed, [(event['_id'], 1, False)])
+
+    def test_notification_failure_never_cancels_saved_trade(self):
+        from app.demo import trade_alerts
+        acc = ledger.change_status(7, active=True)
+        opened = simulator.open_position(acc, signal(), 100, 100.1)
+        with patch.object(trade_alerts, 'queue_transition', side_effect=RuntimeError('offline')):
+            ledger.save(acc, opened)
+        self.assertIsNotNone(ledger.read(7)['position'])
 
     def test_unique_account_per_telegram_user(self):
         a = ledger.get_or_create(7)

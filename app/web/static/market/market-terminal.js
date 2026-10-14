@@ -248,9 +248,43 @@ class Terminal {
     this.followButton = follow;
     const fullscreen = el('button', 'hl-fullscreen', 'Pantalla completa');
     fullscreen.type = 'button';
-    fullscreen.addEventListener('click', () => {
-      if (document.fullscreenElement) document.exitFullscreen();
-      else this.root.requestFullscreen?.();
+    // La pantalla completa corresponde SOLO al escenario gráfico, no al Order Book ni al tape.
+    // Algunos navegadores móviles no admiten requestFullscreen sobre un div:
+    // en ese caso utilizamos un modo de pantalla completa CSS con botón de salida.
+    const fullscreenActive = () => document.fullscreenElement === this.chartStage ||
+      this.chartStage.classList.contains('hl-fullscreen-fallback');
+    const syncFullscreen = () => {
+      const enabled = fullscreenActive();
+      fullscreen.textContent = enabled ? 'Salir de pantalla completa' : 'Pantalla completa';
+      fullscreen.setAttribute('aria-pressed', String(enabled));
+      requestAnimationFrame(() => this.chart?.resize?.());
+    };
+    const leaveFallback = () => {
+      this.chartStage.classList.remove('hl-fullscreen-fallback');
+      document.body.classList.remove('hl-fullscreen-lock');
+      syncFullscreen();
+    };
+    const enterFallback = () => {
+      this.chartStage.classList.add('hl-fullscreen-fallback');
+      document.body.classList.add('hl-fullscreen-lock');
+      syncFullscreen();
+    };
+    fullscreen.addEventListener('click', async () => {
+      if (document.fullscreenElement === this.chartStage) {
+        await document.exitFullscreen?.();
+        return;
+      }
+      if (this.chartStage.classList.contains('hl-fullscreen-fallback')) {
+        leaveFallback();
+        return;
+      }
+      if (!this.chartStage.requestFullscreen) { enterFallback(); return; }
+      try { await this.chartStage.requestFullscreen(); }
+      catch { enterFallback(); }
+    });
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && this.chartStage.classList.contains('hl-fullscreen-fallback')) leaveFallback();
     });
     const zoomIn = el('button', 'hl-zoom', '＋'); zoomIn.type='button'; zoomIn.title='Acercar velas';
     zoomIn.addEventListener('click',()=>this.chart?.zoom?.(-1));
@@ -260,13 +294,16 @@ class Terminal {
     clear.addEventListener('click',()=>this.chart?.removeOverlay({groupId:GROUPS.drawings}));
     controls.append(period, indicator, subIndicator, draw, zoomIn, zoomOut, clear, follow, fullscreen);
     head.append(controls);
-    this.root.append(head);
+    // Escenario independiente: Order Book y Trades permanecen fuera de pantalla completa.
+    this.chartStage = el('div', 'hl-chart-stage');
+    this.root.append(this.chartStage);
+    this.chartStage.append(head);
     this.state = el('div', 'hl-state', 'Conectando datos de mercado…');
     this.state.setAttribute('role', 'status');
-    this.root.append(this.state);
-    const summary = el('div', 'hl-summary'); this.summary = summary; this.root.append(summary);
+    this.chartStage.append(this.state);
+    const summary = el('div', 'hl-summary'); this.summary = summary; this.chartStage.append(summary);
     const surface = el('div', 'hl-surface'); this.surface = surface;
-    const canvas = el('div', 'hl-canvas'); this.canvas = canvas; surface.append(canvas); this.root.append(surface);
+    const canvas = el('div', 'hl-canvas'); this.canvas = canvas; surface.append(canvas); this.chartStage.append(surface);
     const micro = el('div', 'hl-micro');
     const book = el('div', 'hl-book'); book.append(el('h4', '', 'Order Book')); this.bookNode = el('div'); book.append(this.bookNode);
     const tape = el('div', 'hl-trades'); tape.append(el('h4', '', 'Trades públicos')); this.tradesNode = el('div'); tape.append(this.tradesNode);

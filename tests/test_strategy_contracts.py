@@ -333,6 +333,49 @@ class RejectionEvidenceTests(unittest.TestCase):
         self.assertTrue(diag['reset_touched'])
 
 
+class DemoResetTrialTests(unittest.TestCase):
+    def test_demo_confirms_recent_short_past_wider_candle_tolerance(self):
+        n = 16
+        o = [100.0] * n
+        h = [100.2] * n
+        l = [98.9] * n
+        c = [100.0] * n
+        e20 = [100.0] * n
+        e50 = [101.0] * n
+        o[-1], h[-1], l[-1], c[-1] = 99.3, 99.5, 99.05, 99.1
+        args = dict(direction="short", o=o, h=h, l=l, c=c,
+                    v=[100] * n, ema20=e20, ema50=e50,
+                    ema200=[102] * n, atr=1.0)
+        with patch.object(mtf, "MTF_PENDING_SETUP_ENABLED", True):
+            live_ok, live_reason, _ = mtf._detect_simple_mtf_trigger(**args)
+            demo_ok, demo_reason, diag = mtf._detect_simple_mtf_trigger(
+                **args, demo_trial=True)
+        self.assertFalse(live_ok)
+        self.assertEqual(live_reason, "PENDING_CONTINUATION_CONFIRM")
+        self.assertTrue(demo_ok, (demo_reason, diag))
+        self.assertEqual(demo_reason, "OK")
+        self.assertLessEqual(diag["extension_atr"], 0.95)
+
+    def test_live_reset_parameters_unchanged(self):
+        args = dict(direction="long", o=[100.] * 12, h=[101.] * 12,
+                    l=[99.] * 12, c=[100.] * 12,
+                    v=[100.] * 12, ema20=[100.] * 12, ema50=[99.] * 12,
+                    ema200=[98.] * 12, atr=1.)
+        with patch.object(mtf, "MTF_PENDING_SETUP_ENABLED", True), \
+             patch.object(mtf, "find_pending_reset", return_value=(False, "NO_VALID_PENDING_RESET", {})) as mock:
+            mtf._detect_simple_mtf_trigger(**args)
+            live = dict(mock.call_args.kwargs)
+            mtf._detect_simple_mtf_trigger(**args, demo_trial=True)
+            demo = dict(mock.call_args.kwargs)
+        self.assertEqual(live["touch_atr"], mtf.RESET_TOUCH_TOL_ATR)
+        self.assertEqual(live["confirm_atr"], mtf.CONTINUATION_CONFIRM_TOL_ATR)
+        self.assertGreater(demo["touch_atr"], live["touch_atr"])
+        self.assertGreater(demo["confirm_atr"], live["confirm_atr"])
+        self.assertEqual(demo["break_atr"], live["break_atr"])
+        self.assertEqual(demo["max_extension"], live["max_extension"])
+
+
+
 class DemoBiasExperimentTests(unittest.TestCase):
     """La flexibilización alcanza sólo DEMO, sin alterar la ruta LIVE."""
 

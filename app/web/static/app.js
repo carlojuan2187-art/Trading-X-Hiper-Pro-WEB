@@ -1838,7 +1838,15 @@ function initPhoneAuth() {
     submit.textContent = mode === 'register' ? 'Crear cuenta y verificar' : 'Iniciar sesión';
     phoneMessage('');
   };
-  tabs.login.addEventListener('click', () => setMode('login'));
+  tabs.login.addEventListener('click', () => {
+    phoneFlowId = '';
+    if (phoneVerifyWs) { phoneVerifyWs.close(); phoneVerifyWs = null; }
+    sessionStorage.removeItem('hl_phone_flow');
+    sessionStorage.removeItem('hl_phone_bot_url');
+    $('phoneVerifyStep').classList.add('hidden');
+    $('phoneAuthForm').classList.remove('hidden');
+    setMode('login');
+  });
   tabs.register.addEventListener('click', () => setMode('register'));
   for (const [field, button] of [['phonePassword','phoneRevealPassword'], ['phoneConfirmPassword','phoneRevealConfirm']]) {
     const input = $(field), eye = $(button);
@@ -1909,16 +1917,13 @@ function initPhoneAuth() {
       if (!phoneVerifyWs || phoneVerifyWs.readyState > WebSocket.OPEN) connectPhoneVerification();
     }
   });
-  const saved = sessionStorage.getItem('hl_phone_flow');
-  if (saved && /^[A-Za-z0-9_-]{20,48}$/.test(saved)) {
-    phoneFlowId = saved;
-    $('phoneAuthForm').classList.add('hidden');
-    $('phoneVerifyStep').classList.remove('hidden');
-    $('phoneBotLink').href = sessionStorage.getItem('hl_phone_bot_url') || '#';
-    if (!$('phoneBotLink').href || $('phoneBotLink').href.endsWith('#')) $('phoneBotLink').classList.add('hidden');
-    connectPhoneVerification();
-    void completePhoneVerification(false);
-  }
+  // Las verificaciones guardadas solo corresponden a registros incompletos.
+  // No abrir Telegram automáticamente al volver a iniciar sesión.
+  sessionStorage.removeItem('hl_phone_flow');
+  sessionStorage.removeItem('hl_phone_bot_url');
+  phoneFlowId = '';
+  $('phoneVerifyStep').classList.add('hidden');
+  $('phoneAuthForm').classList.remove('hidden');
   setMode('login');
 }
 
@@ -1985,7 +1990,7 @@ async function authenticate() {
     } catch (error) {
       setPreviewMode();
       if (elements.webLoginMessage) {
-        elements.webLoginMessage.textContent = 'Inicia sesión con tu teléfono y contraseña, y verifica con Telegram.';
+        elements.webLoginMessage.textContent = 'Si ya tienes una cuenta verificada, inicia sesión con tu teléfono y contraseña. Telegram solo se utiliza durante el registro.';
       }
       return;
     }

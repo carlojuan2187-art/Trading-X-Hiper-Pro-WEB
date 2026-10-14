@@ -360,8 +360,8 @@ function renderTechnicalSystemPanel(payload) {
   const cards = [
     buildSystemComponentCard('Backend web', { status: payload.backend?.status || 'online', last_seen_at: payload.backend?.checked_at, message: payload.backend?.message, freshness_seconds: 0 }),
     buildSystemComponentCard('Canal Telegram', components.telegram_bot || {}),
-    buildSystemComponentCard('Motor de trading', components.trading_loop || {}),
-    buildSystemComponentCard('Scanner de mercado', components.scanner || {}),
+    buildSystemComponentCard('Motor DEMO', components.trading_loop || {}),
+    buildSystemComponentCard('Scanner DEMO', components.scanner || {}),
   ];
 
   if (elements.systemHealthGridPanel) {
@@ -1394,8 +1394,8 @@ function renderAdminComponentTelemetry(systemRuntime) {
   const bridge = (systemRuntime && systemRuntime.bridge_diagnostics) || {};
   const list = [
     ['telegram_bot', 'Canal Telegram'],
-    ['trading_loop', 'Motor trading'],
-    ['scanner', 'Scanner'],
+    ['trading_loop', 'Motor DEMO'],
+    ['scanner', 'Scanner DEMO'],
   ];
   elements.adminComponentTelemetry.innerHTML = '';
 

@@ -269,7 +269,7 @@
           </form>
           <div class="stats-grid demo-stats" id="demoStats" aria-live="polite"></div>
           <div class="hl-terminal" data-market-terminal data-mode="DEMO" aria-label="Gráfico DEMO de Hyperliquid con entrada, take profit y stop loss">
-            <p>El gráfico necesita compilar el módulo market-terminal para funcionar.</p>
+            <p>Iniciando terminal de mercado…</p>
           </div>
           <div class="glass-card panel-card demo-card">
             <div class="panel-head"><div><span class="section-tag">POSITION · SIMULATED</span><h3>Posición abierta</h3></div><span class="status-pill neutral">PAPER</span></div>
@@ -279,7 +279,7 @@
             <div class="panel-head"><div><span class="section-tag">HISTORY · PAPER TRADING</span><h3>Operaciones cerradas</h3></div><span class="status-pill neutral" id="demoHistoryBadge">0</span></div>
             <div id="demoHistory" class="list-stack empty-state">Aún no hay operaciones simuladas.</div>
           </div>
-          <p class="demo-disclaimer">El simulador usa bid/ask del libro público, comisiones y slippage configurado. Los fills son aproximados: no modela profundidad completa, funding ni liquidaciones; los SL/TP se revisan por cada evento bid/ask recibido. Si falla la conexión WebSocket, la gestión se suspende hasta reconectar. Gráfico con líneas de operación e histórico disponibles en el terminal web al compilar market-terminal.</p>
+          <p class="demo-disclaimer">El simulador usa bid/ask del libro público, comisiones y slippage configurado. Los fills son aproximados: no modela profundidad completa, funding ni liquidaciones; los SL/TP se revisan por cada evento bid/ask recibido. Si falla la conexión WebSocket, la gestión se suspende hasta reconectar. El terminal muestra velas, niveles de operación e historial cuando los datos están disponibles.</p>
         </section>
 
         <section class="panel" data-panel="system">
@@ -447,7 +447,7 @@
 
         <section class="panel" data-panel="operations">
           <div class="hl-terminal" data-market-terminal data-mode="LIVE" aria-label="Gráfico LIVE de Hyperliquid con operaciones, TP y SL">
-            <p>Terminal LIVE de solo lectura: al compilar market-terminal aparecerán las marcas del motor.</p>
+            <p>Iniciando terminal LIVE de solo lectura…</p>
           </div>
 
           <div class="operations-grid">
@@ -699,9 +699,9 @@
       </div>
     </div>
 
-    <link rel="stylesheet" href="/static/market/market-terminal.css" />
-    <script src="/static/app.js?v=phone-auth-v1"></script>
-    <script type="module" src="/static/market/market-terminal.js"></script>
+    <link rel="stylesheet" href="/static/market/market-terminal.css?v=hl-fix1" />
+    <script src="/static/app.js?v=hl-fix1"></script>
+    <script type="module" src="/static/market/market-terminal.js?v=hl-fix1"></script>
     <script type="module" src="/static/trade-share/share-trade.js"></script>
   </body>
 </html>

@@ -16,7 +16,7 @@ from app.api.security import create_session_token
 from app.api.telegram_oidc import CSRF_COOKIE, SESSION_COOKIE
 from app.auth.phone_login import (
     FLOWS, FLOW_SECONDS, PhoneAuthError, begin_flow, finish_flow,
-    valid_browser_flow,
+    valid_browser_flow, authenticate_password_login,
 )
 from app.config import ADMIN_TELEGRAM_ID, BOT_USERNAME, WEBAPP_SESSION_TTL_SECONDS, WEB_BASE_URL
 
@@ -44,12 +44,40 @@ def _raise(exc: PhoneAuthError) -> None:
     raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
 
+def _new_session(uid: int, *, verified_login: bool = False) -> Response:
+    session = create_session_token({'user_id': uid,
+                                    'is_admin': uid == int(ADMIN_TELEGRAM_ID),
+                                    'username': ''})
+    response = JSONResponse({'authenticated': True})
+    response.set_cookie(SESSION_COOKIE, session, max_age=WEBAPP_SESSION_TTL_SECONDS,
+                        httponly=True, secure=True, samesite='lax', path='/')
+    response.set_cookie(CSRF_COOKIE, secrets.token_urlsafe(32), max_age=WEBAPP_SESSION_TTL_SECONDS,
+                        httponly=False, secure=True, samesite='lax', path='/')
+    if verified_login:
+        response.delete_cookie(FLOW_COOKIE, path='/api/v1/auth/phone')
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 @router.post('/start')
 def start_phone_login(data: BeginRequest, request: Request) -> Response:
     if not _secure_origin(request.headers.get('origin')):
         raise HTTPException(status_code=403, detail='Origen de solicitud inválido')
-    if not re.fullmatch(r'[A-Za-z0-9_]{5,32}', (os.getenv('BOT_USERNAME') or '').strip().lstrip('@')) or not os.getenv('WEBAPP_SESSION_SECRET'):
+    if not os.getenv('WEBAPP_SESSION_SECRET'):
         raise HTTPException(status_code=503, detail='Autenticación telefónica sin configurar')
+    if data.mode == 'login':
+        try:
+            uid = authenticate_password_login(
+                data.phone, data.password,
+                request.client.host if request.client else 'unknown',
+            )
+        except PhoneAuthError as exc:
+            _raise(exc)
+        return _new_session(uid, verified_login=True)
+    if data.mode != 'register':
+        raise HTTPException(status_code=400, detail='Tipo de acceso inválido')
+    if not re.fullmatch(r'[A-Za-z0-9_]{5,32}', (os.getenv('BOT_USERNAME') or '').strip().lstrip('@')):
+        raise HTTPException(status_code=503, detail='Bot de registro no configurado')
     try:
         flow_id, browser_secret = begin_flow(
             data.phone, data.password, data.mode, data.referrer,
@@ -73,17 +101,7 @@ def complete_phone_login(payload: CompleteRequest, request: Request) -> Response
         uid = finish_flow(payload.flow_id, request.cookies.get(FLOW_COOKIE, ''))
     except PhoneAuthError as exc:
         _raise(exc)
-    session = create_session_token({'user_id': uid,
-                                    'is_admin': uid == int(ADMIN_TELEGRAM_ID),
-                                    'username': ''})
-    response = JSONResponse({'authenticated': True})
-    response.set_cookie(SESSION_COOKIE, session, max_age=WEBAPP_SESSION_TTL_SECONDS,
-                        httponly=True, secure=True, samesite='lax', path='/')
-    response.set_cookie(CSRF_COOKIE, secrets.token_urlsafe(32), max_age=WEBAPP_SESSION_TTL_SECONDS,
-                        httponly=False, secure=True, samesite='lax', path='/')
-    response.delete_cookie(FLOW_COOKIE, path='/api/v1/auth/phone')
-    response.headers['Cache-Control'] = 'no-store'
-    return response
+    return _new_session(uid, verified_login=True)
 
 
 class FlowChangeHub:

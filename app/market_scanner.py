@@ -8,6 +8,9 @@ from __future__ import annotations
 import os
 import time
 import threading
+import logging
+import math
+from collections import Counter
 from app.symbol_policy import BLOCKED_MEME_KEYWORDS, rejection_reason
 from app.scan_coverage import Coverage
 from app.settings_utils import env_float
@@ -54,6 +57,49 @@ _l2_coverage = Coverage()
 _scan_lock = threading.Lock()
 _SCAN_REFRESH_SECONDS = env_float("SCANNER_REFRESH_SECONDS", 5.0, minimum=1.0)
 _L2_BUDGET_SECONDS = env_float("SCANNER_L2_BUDGET_SECONDS", 12.0, minimum=1.0)
+
+
+# Métricas de observación solamente; no cambian el resultado del scanner.
+_scanner_logger = logging.getLogger(__name__)
+_SCANNER_FUNNEL_LAST_LOG_TS = float("-inf")
+_SCANNER_FUNNEL_LOG_SECONDS = max(float(os.getenv("SCANNER_FUNNEL_LOG_SECONDS", "300") or 300), 60.0)
+_SCANNER_FUNNEL_LAST: dict[str, int] = {}
+
+
+def get_scanner_funnel_snapshot() -> dict[str, int]:
+    """Último embudo, sin alterar la lista del scanner ni filtrar por usuario."""
+    return dict(_SCANNER_FUNNEL_LAST)
+
+
+def _publish_scanner_funnel(counter: Counter) -> None:
+    global _SCANNER_FUNNEL_LAST, _SCANNER_FUNNEL_LAST_LOG_TS
+    # Normalmente se llama bajo _scan_lock, desde el refresco del scanner.
+    _SCANNER_FUNNEL_LAST = {str(key): int(value) for key, value in counter.items()}
+    now = time.monotonic()
+    if now - _SCANNER_FUNNEL_LAST_LOG_TS < _SCANNER_FUNNEL_LOG_SECONDS:
+        return
+    _SCANNER_FUNNEL_LAST_LOG_TS = now
+    fields = " ".join(f"{k}={v}" for k, v in sorted(_SCANNER_FUNNEL_LAST.items()))
+    _scanner_logger.info("SCANNER_FUNNEL %s", fields)
+
+
+def _symbol_prefilter_reason(info: dict) -> str:
+    """Clasificación informativa; no participa en el rechazo."""
+    try:
+        price = float(info.get("markPx", 0))
+        volume = float(info.get("dayNtlVlm", 0))
+        open_interest = float(info.get("openInterest", 0))
+    except (ValueError, TypeError, OverflowError):
+        return "invalid_market_values"
+    if not all(map(math.isfinite, (price, volume, open_interest))):
+        return "invalid_market_values"
+    if price <= 0 or volume <= 0:
+        return "invalid_market_values"
+    if volume < float(SCANNER_MIN_24H_NOTIONAL):
+        return "min_24h_notional"
+    if max(0.0, open_interest * price) < float(SCANNER_MIN_OPEN_INTEREST):
+        return "min_open_interest"
+    return "other_prefilter"
 
 
 def mark_symbol_evaluated(symbol: str) -> None:
@@ -246,41 +292,59 @@ def _fetch_l2_quality(symbol: str) -> Optional[dict]:
 
 def _get_live_results(exclude_symbols: Set[str]) -> Optional[List[dict]]:
     markets = _fetch_markets()
+    counters = Counter()
     if markets is None:
+        counters["market_source_unavailable"] = 1
+        _publish_scanner_funnel(counters)
         return None
     prefiltered: List[dict] = []
+    counters["markets"] = len(markets)
 
     for symbol, info in markets.items():
         if symbol in exclude_symbols:
+            counters["excluded"] += 1
             continue
         if _is_blocked_meme_symbol(symbol):
+            counters["symbol_policy"] += 1
             continue
         parsed = _score_symbol(symbol, info)
         if parsed:
             prefiltered.append(parsed)
+        else:
+            counters[_symbol_prefilter_reason(info)] += 1
 
+    counters["prefiltered"] = len(prefiltered)
     if not prefiltered:
+        counters["shortlisted"] = 0
+        _publish_scanner_funnel(counters)
         return []
 
     prefiltered.sort(key=lambda x: x["score"], reverse=True)
     l2_depth = max(1, int(SCANNER_SHORTLIST_DEPTH_FOR_L2 or 1))
     inspect = _l2_coverage.order(prefiltered)[:l2_depth]
+    counters["l2_candidates"] = len(inspect)
+    counters["l2_not_selected"] = max(0, len(prefiltered) - len(inspect))
     results: List[dict] = []
 
     l2_started = time.monotonic()
     for index, parsed in enumerate(inspect):
         if index > 0 and time.monotonic() - l2_started >= _L2_BUDGET_SECONDS:
+            counters["l2_budget_skipped"] += len(inspect) - index
             break
         symbol = str(parsed.get("symbol") or "")
         _l2_coverage.mark(symbol)
+        counters["l2_checked"] += 1
         quality = _fetch_l2_quality(symbol)
         if not quality:
+            counters["l2_unavailable"] += 1
             continue
         spread_bps = float(quality.get("spread_bps") or 0.0)
         top_book = float(quality.get("top_book_notional") or 0.0)
         if spread_bps <= 0 or spread_bps > float(SCANNER_MAX_SPREAD_BPS):
+            counters["spread_rejected"] += 1
             continue
         if top_book < float(SCANNER_MIN_TOP_BOOK_NOTIONAL):
+            counters["top_book_rejected"] += 1
             continue
         row = dict(parsed)
         row.update({
@@ -294,7 +358,10 @@ def _get_live_results(exclude_symbols: Set[str]) -> Optional[List[dict]]:
 
     results.sort(key=lambda x: x["score"], reverse=True)
     if SCANNER_DEPTH and len(results) > SCANNER_DEPTH:
+        counters["scanner_depth_skipped"] = len(results) - SCANNER_DEPTH
         results = results[:SCANNER_DEPTH]
+    counters["shortlisted"] = len(results)
+    _publish_scanner_funnel(counters)
     return results
 
 

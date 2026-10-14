@@ -389,7 +389,7 @@ def _bias_from_tf(tf_ctx: Dict[str, Any], *, adx_min: float, require_close_on_fa
     }
 
 
-def _h1_bias(tf_ctx: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+def _h1_bias(tf_ctx: Dict[str, Any], *, demo_trial: bool = False) -> Tuple[str, Dict[str, Any]]:
     direction, diag = _bias_from_tf(tf_ctx, adx_min=H1_ADX_MIN,
                                    require_slow_stack=MTF_H1_REQUIRE_EMA200)
     diag["h1_mode"] = "strict" if MTF_H1_REQUIRE_EMA200 else "without_ema200"
@@ -434,13 +434,42 @@ def _h1_bias(tf_ctx: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     if all(checks.values()):
         diag["h1_mode"] = "confirmed_transition"
         return candidate, diag
+    # Sólo para DEMO: anticipar UN cierre de vela cuando exactamente EMA200
+    # impide entrar. Mantener ADX, las pendientes en dirección de la señal,
+    # el alineamiento EMA20/EMA50 y la pendiente reciente de ambos indicadores.
+    # No aceptar giros sin fuerza ni saltarse el cierre de la vela de 1h.
+    if (demo_trial and checks["ADX"] and checks["SLOPES"]
+            and checks["RECENT_SLOPES"]
+            and sign * (float(c[-1]) - float(e20[-1])) > 0
+            and sign * (float(e20[-1]) - float(e50[-1])) > 0):
+        diag["h1_mode"] = "demo_early_transition"
+        diag["transition_confirmation_bars"] = 1
+        return candidate, diag
     return direction, diag
 
 
-def _m15_confirmation(tf_ctx: Dict[str, Any], direction: str) -> Tuple[str, Dict[str, Any]]:
+def _m15_confirmation(tf_ctx: Dict[str, Any], direction: str, *, demo_trial: bool = False) -> Tuple[str, Dict[str, Any]]:
     bias, diag = _bias_from_tf(tf_ctx, adx_min=M15_ADX_MIN,
                              require_slow_stack=MTF_M15_REQUIRE_EMA200)
     diag["m15_mode"] = "strict"
+    if bias == "none" and demo_trial and direction in ("long", "short"):
+        # Sólo EMA200 puede fallar. El resto (incluidos ADX, pendientes,
+        # precio y alineación de medias rápidas) debe haber pasado ya.
+        slow_check = "EMA50_ABOVE_EMA200" if direction == "long" else "EMA50_BELOW_EMA200"
+        if diag.get("failed_" + direction) == [slow_check]:
+            sign = 1 if direction == "long" else -1
+            c = tf_ctx.get("c") or []
+            e20 = tf_ctx.get("ema20") or []
+            e50 = tf_ctx.get("ema50") or []
+            # Dos velas M15 cerradas: evita aprobar cruces fugaces.
+            if (float(tf_ctx.get("adx") or 0) >= max(M15_ADX_MIN, 14.0)
+                    and min(len(c), len(e20), len(e50)) >= 2
+                    and all(sign * (float(c[i]) - float(e20[i])) > 0 and
+                            sign * (float(e20[i]) - float(e50[i])) > 0
+                            for i in (-2, -1))):
+                diag["m15_mode"] = "demo_fast_trend_confirmed"
+                return direction, diag
+            diag["demo_transition_rejected"] = "WEAK_OR_UNCONFIRMED_M15"
     if bias != "none" or direction not in ("long", "short") or not MTF_M15_PULLBACK_ENABLED:
         return bias, diag
     # A pullback can turn the fast EMA before it breaks the medium-term structure.
@@ -737,8 +766,9 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> dict:
         if adx5 < M5_ADX_MIN:
             return {"signal": False, "reason": "ADX_5M_TOO_LOW", "coin": coin, "diag": {"adx5": round(adx5, 2)}}
 
-        bias1h, diag1h = _h1_bias(tf1h)
-        bias15, diag15 = _m15_confirmation(tf15, bias1h)
+        demo_trial = market_context.get("_execution_mode") == "demo"
+        bias1h, diag1h = _h1_bias(tf1h, demo_trial=demo_trial)
+        bias15, diag15 = _m15_confirmation(tf15, bias1h, demo_trial=demo_trial)
         if bias1h == "none":
             return {"signal": False, "reason": "NO_H1_BIAS", "coin": coin, "diag": diag1h}
         if bias15 == "none":

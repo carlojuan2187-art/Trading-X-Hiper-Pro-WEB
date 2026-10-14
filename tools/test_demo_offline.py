@@ -546,5 +546,16 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertIsNotNone(simulator.open_position(closed, signal(), 100, 100.1))
 
 
+    def test_demo_book_depth_must_cover_order_notional(self):
+        acc = ledger.change_status(7, active=True)
+        too_thin = signal()
+        too_thin["scanner"] = {"top_book_notional": 500}
+        # Capital de prueba 100 USDC y 10x; 500 USDC de book no cubre 1.5x.
+        self.assertIsNone(simulator.open_position(acc, too_thin, 100, 100.1))
+        liquid = signal()
+        liquid["scanner"] = {"top_book_notional": 3000}
+        self.assertIsNotNone(simulator.open_position(acc, liquid, 100, 100.1))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

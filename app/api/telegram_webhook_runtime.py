@@ -63,20 +63,25 @@ async def start_telegram_webhook(app) -> None:
             await asyncio.sleep(50)
 
     app.state.telegram_heartbeat_task = asyncio.create_task(_webhook_runtime_heartbeat())
+    from app.demo.trade_alerts import dispatch_loop
+    app.state.telegram_alert_task = asyncio.create_task(dispatch_loop(tg.bot))
     logger.info('Telegram webhook listo en %s (sin polling ni trading loop)', WEBHOOK_PATH)
 
 
 async def stop_telegram_webhook(app) -> None:
     tg = getattr(app.state, 'telegram_application', None)
     task = getattr(app.state, 'telegram_heartbeat_task', None)
+    alert_task = getattr(app.state, 'telegram_alert_task', None)
     app.state.telegram_heartbeat_task = None
+    app.state.telegram_alert_task = None
     app.state.telegram_application = None
-    if task is not None:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    for background in (task, alert_task):
+        if background is not None:
+            background.cancel()
+            try:
+                await background
+            except asyncio.CancelledError:
+                pass
     app.state.telegram_webhook_secret = None
     if tg is not None:
         if tg.running:

@@ -471,7 +471,7 @@ def _safe_latest_runtime_doc(collection, query: dict | None = None) -> dict | No
 
 
 def _build_runtime_bridge_diagnostics(components: dict) -> dict:
-    expected = ['telegram_bot', 'trading_loop', 'scanner']
+    expected = ['telegram_bot', 'demo_worker', 'demo_scanner']
     backend_identity = get_runtime_identity()
     runtime_status_count = _safe_collection_count(runtime_status_col)
     runtime_shadow_count = _safe_collection_count(runtime_components_shadow_col)
@@ -480,16 +480,17 @@ def _build_runtime_bridge_diagnostics(components: dict) -> dict:
     latest_primary = _safe_latest_runtime_doc(runtime_status_col)
     latest_shadow = _safe_latest_runtime_doc(runtime_components_shadow_col)
 
-    missing_components = [name for name in expected if not components.get(name) or (components.get(name) or {}).get('state') == 'missing']
+    monitored_components = {'telegram_bot': components.get('telegram_bot'), 'demo_worker': components.get('trading_loop'), 'demo_scanner': components.get('scanner')}
+    missing_components = [name for name in expected if not monitored_components.get(name) or (monitored_components.get(name) or {}).get('state') == 'missing']
     writer_db_names = sorted({
-        str(((components.get(name) or {}).get('metadata') or {}).get('writer_db_name') or '').strip()
+        str(((monitored_components.get(name) or {}).get('metadata') or {}).get('writer_db_name') or '').strip()
         for name in expected
-        if str(((components.get(name) or {}).get('metadata') or {}).get('writer_db_name') or '').strip()
+        if str(((monitored_components.get(name) or {}).get('metadata') or {}).get('writer_db_name') or '').strip()
     })
     writer_mongo_fingerprints = sorted({
-        str(((components.get(name) or {}).get('metadata') or {}).get('writer_mongo_target_fingerprint') or '').strip()
+        str(((monitored_components.get(name) or {}).get('metadata') or {}).get('writer_mongo_target_fingerprint') or '').strip()
         for name in expected
-        if str(((components.get(name) or {}).get('metadata') or {}).get('writer_mongo_target_fingerprint') or '').strip()
+        if str(((monitored_components.get(name) or {}).get('metadata') or {}).get('writer_mongo_target_fingerprint') or '').strip()
     })
 
     status = 'healthy'
@@ -502,7 +503,7 @@ def _build_runtime_bridge_diagnostics(components: dict) -> dict:
             message = 'Esta API no encuentra ningún heartbeat en runtime_status ni en runtime_components_shadow.'
             hints.append('Lo más probable es que el worker/bot esté escribiendo en otra DB/servicio, o que no pueda persistir en Mongo.')
         else:
-            message = 'Esta API sí ve documentos runtime en la DB actual, pero no ve telegram_bot/trading_loop/scanner.'
+            message = 'Esta API sí ve documentos runtime en la DB actual, pero no ve telegram_bot/demo_worker/demo_scanner.'
             hints.append('Revisar despliegue parcial, nombres de componente o limpieza accidental de las colecciones de runtime.')
     elif missing_components:
         status = 'warning'
@@ -539,8 +540,8 @@ def get_system_runtime_snapshot() -> dict:
     now = _now_utc()
     components = {
         'telegram_bot': _runtime_component_snapshot('telegram_bot', warning_after_seconds=90, critical_after_seconds=300),
-        'trading_loop': _runtime_component_snapshot('trading_loop', warning_after_seconds=90, critical_after_seconds=300),
-        'scanner': _runtime_component_snapshot('scanner', warning_after_seconds=120, critical_after_seconds=360),
+        'trading_loop': _runtime_component_snapshot('demo_worker', warning_after_seconds=120, critical_after_seconds=300),
+        'scanner': _runtime_component_snapshot('demo_scanner', warning_after_seconds=120, critical_after_seconds=300),
     }
 
     plan_active_query = {

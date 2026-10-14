@@ -144,34 +144,69 @@ class Terminal {
     heading.append(ticker);
     head.append(heading);
     const controls = el('div', 'hl-controls');
+    // Selector de perpetuos: abre el catálogo completo al pulsar la flecha.
+    // El input permite buscar sin depender de datalist (inconsistente en móvil/PC).
     const symbolInput = el('input', 'hl-symbol');
-    symbolInput.setAttribute('aria-label', 'Buscar contrato');
-    symbolInput.placeholder = 'BTC, ETH, SOL…';
+    symbolInput.setAttribute('aria-label', 'Buscar par perpetuo de Hyperliquid');
+    symbolInput.setAttribute('role', 'combobox');
+    symbolInput.setAttribute('aria-autocomplete', 'list');
+    symbolInput.setAttribute('aria-expanded','false');
+    symbolInput.placeholder = 'Buscar BTC, ETH, SOL…';
     symbolInput.value = 'BTC';
     symbolInput.autocomplete = 'off';
-    const suggestions = el('datalist');
-    suggestions.id = `hl-symbols-${this.mode.toLowerCase()}`;
-    symbolInput.setAttribute('list', suggestions.id);
-    const confirmSymbol = () => {
-      const candidate = coin(symbolInput.value);
-      if (this.instruments.has(candidate)) this.choose(candidate, false);
-      else {this.notice('Contrato no disponible: selecciona un par de la lista.', 'error');symbolInput.value=this.symbol;}
-    };
-    symbolInput.addEventListener('change', confirmSymbol);
-    symbolInput.addEventListener('keydown', event=>{if(event.key==='Enter'){event.preventDefault();confirmSymbol();symbolInput.blur();}});
     const picker=el('div','hl-symbol-picker');
-    const results=el('div','hl-symbol-results');results.setAttribute('role','listbox');results.hidden=true;
-    picker.append(symbolInput,suggestions,results);
-    this.symbolPicker=picker;this.symbolResults=results;
-    symbolInput.addEventListener('focus',()=>this.renderSymbolResults(symbolInput.value));
-    symbolInput.addEventListener('blur',()=>setTimeout(()=>{results.hidden=true;},180));
-    this.symbolInput = symbolInput;
-    this.suggestions = suggestions;
-    this.symbolSearchTimer = null;
-    symbolInput.addEventListener('input', () => {
-      clearTimeout(this.symbolSearchTimer);
-      this.symbolSearchTimer = setTimeout(() => this.loadInstruments(symbolInput.value), 180);
+    const toggle=el('button','hl-symbol-toggle','▾');
+    toggle.type='button';toggle.setAttribute('aria-label','Mostrar todos los pares perpetuos');
+    toggle.setAttribute('title','Mostrar todos los pares perpetuos');
+    const results=el('div','hl-symbol-results');
+    results.setAttribute('role','listbox');results.hidden=true;
+    results.id=`hl-symbol-options-${this.mode.toLowerCase()}`;
+    symbolInput.setAttribute('aria-controls',results.id);
+    picker.append(symbolInput,toggle,results);
+    this.symbolPicker=picker;this.symbolResults=results;this.symbolToggle=toggle;
+    this.symbolInput=symbolInput;this.symbolSearchTimer=null;this.symbolPageSize=80;
+    this.symbolVisibleLimit=this.symbolPageSize;this.symbolQuery='';
+    const confirmSymbol=()=>{
+      const candidate=coin(symbolInput.value);
+      if(this.instruments.has(candidate)) {this.choose(candidate,false);this.closeSymbolResults();}
+      else {this.notice('Contrato no disponible: selecciona un par del catálogo.','error');symbolInput.value=this.symbol;}
+    };
+    toggle.addEventListener('pointerdown',e=>e.preventDefault());
+    toggle.addEventListener('click',()=>{
+      if(!results.hidden){this.closeSymbolResults();return;}
+      symbolInput.value='';this.symbolVisibleLimit=this.symbolPageSize;
+      this.renderSymbolResults('',true);
+      symbolInput.focus();
+      if(!this.instrumentCache) void this.loadInstruments('');
     });
+    symbolInput.addEventListener('focus',()=>this.renderSymbolResults(symbolInput.value,true));
+    symbolInput.addEventListener('input',()=>{
+      clearTimeout(this.symbolSearchTimer);
+      this.symbolVisibleLimit=this.symbolPageSize;
+      this.symbolSearchTimer=setTimeout(()=>{
+        this.renderSymbolResults(symbolInput.value,true);
+        if(!this.instrumentCache)void this.loadInstruments(symbolInput.value);
+      },80);
+    });
+    symbolInput.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){this.closeSymbolResults();symbolInput.value=this.symbol;symbolInput.blur();}
+      else if(event.key==='Enter'){event.preventDefault();if(this.instruments.has(coin(symbolInput.value)))confirmSymbol();else if(!results.hidden&&results.querySelector('.hl-symbol-option'))results.querySelector('.hl-symbol-option').click();else confirmSymbol();}
+      else if(event.key==='ArrowDown'){event.preventDefault();if(results.hidden)this.renderSymbolResults(symbolInput.value,true);results.querySelector('.hl-symbol-option')?.focus();}
+    });
+    results.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){this.closeSymbolResults();symbolInput.value=this.symbol;symbolInput.focus();}
+      else if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+        event.preventDefault();const choices=[...results.querySelectorAll('.hl-symbol-option')];
+        const at=choices.indexOf(document.activeElement);choices[Math.max(0,Math.min(choices.length-1,at+(event.key==='ArrowDown'?1:-1)))]?.focus();
+      }
+    });
+    results.addEventListener('scroll',()=>{
+      if(results.scrollTop+results.clientHeight>=results.scrollHeight-55&&this.symbolVisibleLimit<(this.symbolMatches?.length||0)){
+        this.symbolVisibleLimit+=this.symbolPageSize;this.renderSymbolResults(this.symbolQuery,true);
+      }
+    });
+    document.addEventListener('pointerdown',event=>{if(!picker.contains(event.target))this.closeSymbolResults();});
+    controls.append(picker);
     const period = el('select', 'hl-timeframe');
     period.setAttribute('aria-label', 'Temporalidad');
     Object.keys(FRAMES).forEach(k => { const item = el('option', '', k.toUpperCase()); item.value = k; period.append(item); });
@@ -223,7 +258,7 @@ class Terminal {
     zoomOut.addEventListener('click',()=>this.chart?.zoom?.(1));
     const clear = el('button', 'hl-clear', 'Borrar dibujos');clear.type='button';
     clear.addEventListener('click',()=>this.chart?.removeOverlay({groupId:GROUPS.drawings}));
-    controls.append(picker, period, indicator, subIndicator, draw, zoomIn, zoomOut, clear, follow, fullscreen);
+    controls.append(period, indicator, subIndicator, draw, zoomIn, zoomOut, clear, follow, fullscreen);
     head.append(controls);
     this.root.append(head);
     this.state = el('div', 'hl-state', 'Conectando datos de mercado…');
@@ -267,33 +302,51 @@ class Terminal {
     } catch (e) { this.notice(`No se pudieron sincronizar operaciones: ${e.message}`, 'error'); }
     finally { this.loadingOverlays = false; }
   }
+  closeSymbolResults(){
+    clearTimeout(this.symbolSearchTimer);
+    this.symbolResults.hidden=true;this.symbolInput.setAttribute('aria-expanded','false');
+    this.symbolToggle.setAttribute('aria-expanded','false');
+    this.symbolInput.value=this.symbol;
+  }
   async loadInstruments(search) {
     if (!this.active) return;
     const generation=++this.instrumentGeneration;
     try {
-      // El catálogo es metadata, no precio: se consulta solo una vez por sesión.
-      const items=this.instrumentCache || (await getApi('/api/v1/market/instruments?limit=500')).items;
-      if (Array.isArray(items)) this.instrumentCache=items;
+      // Catálogo auténtico de contratos perpetuos (metadatos Hyperliquid).
+      const items=this.instrumentCache || (await getApi('/api/v1/market/instruments?limit=2000')).items;
       if(generation!==this.instrumentGeneration || !this.active)return;
-      if(!Array.isArray(items)) throw new Error('Catálogo inválido');
+      if(!Array.isArray(items))throw new Error('Catálogo inválido');
+      this.instrumentCache=items;
       this.instruments=new Set(items.map(x=>x.symbol));
-      const q=coin(search); const filtered=items.filter(x=>!search || x.symbol.includes(q)).slice(0,120);
-      this.suggestions.replaceChildren(...filtered.map(item=>{const node=el('option');node.value=item.symbol;node.label=item.display||`${item.symbol}/USDC`;return node;}));
-      this.renderSymbolResults(search);
-    } catch(e){if(generation===this.instrumentGeneration) this.notice(`Catálogo no disponible: ${e.message}`,'error');}
+      if(!this.symbolResults.hidden||document.activeElement===this.symbolInput)this.renderSymbolResults(this.symbolInput.value,true);
+    }catch(e){if(generation===this.instrumentGeneration)this.notice(`Catálogo no disponible: ${e.message}`,'error');}
   }
-  renderSymbolResults(search){
-    if(!this.symbolResults||!this.instrumentCache)return;
-    const q=coin(search);
-    const choices=this.instrumentCache.filter(item=>!search||item.symbol.includes(q)).slice(0,24);
-    this.symbolResults.replaceChildren(...choices.map(item=>{
-      const choice=el('button','hl-symbol-option',item.display||`${item.symbol}/USDC`);
-      choice.type='button';choice.setAttribute('role','option');
-      choice.addEventListener('pointerdown',e=>e.preventDefault());
-      choice.addEventListener('click',()=>{this.choose(item.symbol,false);this.symbolResults.hidden=true;});
-      return choice;
-    }));
-    this.symbolResults.hidden=!choices.length||document.activeElement!==this.symbolInput;
+  renderSymbolResults(search='',open=false){
+    if(!this.symbolResults)return;
+    const q=String(search||'').trim().toUpperCase();
+    if(q!==this.symbolQuery){this.symbolVisibleLimit=this.symbolPageSize;this.symbolResults.scrollTop=0;}
+    this.symbolQuery=q;
+    const data=this.instrumentCache;
+    this.symbolResults.replaceChildren();
+    if(!data){this.symbolResults.append(el('div','hl-symbol-caption','Cargando contratos perpetuos…'));}
+    else {
+      this.symbolMatches=data.filter(item=>!q||item.symbol.includes(q)||String(item.display||'').toUpperCase().includes(q));
+      this.symbolResults.append(el('div','hl-symbol-caption',`Perpetuos Hyperliquid · ${this.symbolMatches.length} de ${data.length}`));
+      if(!this.symbolMatches.length)this.symbolResults.append(el('div','hl-symbol-caption','Sin coincidencias.'));
+      const visible=this.symbolMatches.slice(0,this.symbolVisibleLimit);
+      for(const item of visible){
+        const choice=el('button','hl-symbol-option',item.display||`${item.symbol}/USDC`);
+        choice.type='button';choice.setAttribute('role','option');
+        choice.setAttribute('aria-selected',String(item.symbol===this.symbol));
+        choice.addEventListener('pointerdown',e=>e.preventDefault());
+        choice.addEventListener('click',()=>{this.choose(item.symbol,false);this.closeSymbolResults();this.symbolInput.blur();});
+        this.symbolResults.append(choice);
+      }
+      if(this.symbolVisibleLimit<this.symbolMatches.length)this.symbolResults.append(el('div','hl-symbol-caption',`Desplázate para ver más · ${visible.length}/${this.symbolMatches.length}`));
+    }
+    if(open)this.symbolResults.hidden=false;
+    this.symbolInput.setAttribute('aria-expanded',String(!this.symbolResults.hidden));
+    this.symbolToggle.setAttribute('aria-expanded',String(!this.symbolResults.hidden));
   }
   choose(symbol, follow) {
     if(!this.instruments.has(symbol) && !follow){this.notice('Contrato no disponible en el catálogo','error');return;}
@@ -302,7 +355,7 @@ class Terminal {
     this.symbol = symbol;
     this.symbolInput.value = symbol;
     this.book = null; this.trades = []; this.assetContext = null; this.prevPrice=null;this.quotePrice=null;this.priceSource=null;
-    this.tickPrice.textContent='—';this.tickPrice.dataset.direction='flat';this.tickArrow.textContent='●';this.tickArrow.dataset.direction='flat';
+    this.tickPrice.textContent='—';this.tickPrice.dataset.direction='flat';this.tickArrow.textContent='●';this.tickArrow.dataset.direction='flat';this.chart?.setLastPrice?.(null);
     this.drawMicro();
     this.overlayKey = '';
     if (this.chart) this.chart.setSymbol({ ticker: symbol, pricePrecision: 6, volumePrecision: 4 });
@@ -439,6 +492,7 @@ class Terminal {
     const direction=previous===null? 'flat' :p>previous?'up':p<previous?'down':this.tickPrice.dataset.direction||'flat';
     this.tickPrice.dataset.direction=direction;this.tickArrow.dataset.direction=direction;
     this.tickArrow.textContent=direction==='up'?'▲':direction==='down'?'▼':'●';
+    this.chart?.setLastPrice?.(p,direction);
   }
   scheduleMicro(){
     if(this.microPending)return;this.microPending=true;

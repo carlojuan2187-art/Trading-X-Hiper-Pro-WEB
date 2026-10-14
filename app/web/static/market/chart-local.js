@@ -19,6 +19,7 @@ class Chart {
     this.canvas.style.cssText='display:block;width:100%;height:100%;touch-action:none;';host.replaceChildren(this.canvas);
     this.ctx=this.canvas.getContext('2d');this.bars=[];this.indicators=new Map();this.overlays=[];
     this.visibleCount=40;this.scrollBack=0;this.hover=null;this.loadingGeneration=0;this.paintPending=false;
+    this.livePrice=null;this.liveDirection='flat';
     this.onWheel=e=>{e.preventDefault();this.zoom(e.deltaY>0?1:-1);};
     this.canvas.addEventListener('wheel',this.onWheel,{passive:false});
     this.canvas.addEventListener('pointerdown',e=>{
@@ -39,7 +40,14 @@ class Chart {
   setDataLoader(loader){this.loader=loader;this.reload();}
   setSymbol(s){const name=s?.ticker;if(!name||this.symbol?.ticker===name)return;this.symbol=s;this.reload();}
   setPeriod(p){if(!p||JSON.stringify(this.period)===JSON.stringify(p))return;this.period=p;this.reload();}
-  reload(){if(!this.loader||!this.symbol||!this.period)return;const old=this.activeSubscription;this.activeSubscription=null;old?.unsubscribe?.();const gen=++this.loadingGeneration;this.bars=[];this.scrollBack=0;this.hover=null;this.userDrawings=[];this.requestRender();
+  setLastPrice(price, direction='flat'){
+    const next=val(price);
+    const safe=next!==null&&next>0?next:null;
+    const dir=['up','down','flat'].includes(direction)?direction:'flat';
+    if(this.livePrice===safe&&this.liveDirection===dir)return;
+    this.livePrice=safe;this.liveDirection=dir;this.requestRender();
+  }
+  reload(){if(!this.loader||!this.symbol||!this.period)return;const old=this.activeSubscription;this.activeSubscription=null;old?.unsubscribe?.();const gen=++this.loadingGeneration;this.bars=[];this.livePrice=null;this.liveDirection='flat';this.scrollBack=0;this.hover=null;this.userDrawings=[];this.requestRender();
     const symbol={...this.symbol},period={...this.period};const cb=rows=>{if(gen!==this.loadingGeneration)return;this.bars=(Array.isArray(rows)?rows:[]).filter(valid).map(x=>({...x,volume:val(x.volume)||0})).sort((a,b)=>a.timestamp-b.timestamp).filter((x,i,a)=>i===0||x.timestamp!==a[i-1].timestamp);this.requestRender();};
     this.loader.getBars({type:'init',symbol,period,callback:cb});
     const callback=row=>{if(gen!==this.loadingGeneration||!valid(row))return;const last=this.bars[this.bars.length-1];if(last?.timestamp===row.timestamp)this.bars[this.bars.length-1]=row;else if(!last||row.timestamp>last.timestamp)this.bars.push(row);else return;if(this.bars.length>700)this.bars.splice(0,this.bars.length-700);this.requestRender();};
@@ -57,7 +65,10 @@ class Chart {
   resize(){const r=this.host.getBoundingClientRect(),w=Math.max(260,r.width||this.host.clientWidth||320),h=Math.max(290,r.height||this.host.clientHeight||330),dpr=Math.min(window.devicePixelRatio||1,2);if(this.canvas.width!==Math.round(w*dpr)||this.canvas.height!==Math.round(h*dpr)){this.canvas.width=Math.round(w*dpr);this.canvas.height=Math.round(h*dpr);}this.ctx?.setTransform(dpr,0,0,dpr,0,0);this.width=w;this.height=h;this.requestRender();}
   requestRender(){if(this.paintPending)return;this.paintPending=true;requestAnimationFrame(()=>{this.paintPending=false;this.render();});}
   viewport(){const end=Math.max(0,this.bars.length-this.scrollBack),begin=Math.max(0,end-this.visibleCount);return {begin,end,rows:this.bars.slice(begin,end)};}
-  priceBounds(){const {rows}=this.viewport();if(!rows.length)return {low:0,high:1};let low=Math.min(...rows.map(x=>x.low)),high=Math.max(...rows.map(x=>x.high));for(const ov of this.overlays)for(const p of ov.points||[]){const v=val(p.value);if(v!==null&&v>0){low=Math.min(low,v);high=Math.max(high,v);}}const pad=(high-low)*.10||Math.abs(high)*.005||.01;return {low:low-pad,high:high+pad};}
+  priceBounds(){const {rows}=this.viewport();if(!rows.length)return {low:0,high:1};let low=Math.min(...rows.map(x=>x.low)),high=Math.max(...rows.map(x=>x.high));
+    // La línea del último tick forma parte de la escala solamente al seguir las velas recientes.
+    if(this.scrollBack===0&&this.livePrice!==null){low=Math.min(low,this.livePrice);high=Math.max(high,this.livePrice);}
+    for(const ov of this.overlays)for(const p of ov.points||[]){const v=val(p.value);if(v!==null&&v>0){low=Math.min(low,v);high=Math.max(high,v);}}const pad=(high-low)*.10||Math.abs(high)*.005||.01;return {low:low-pad,high:high+pad};}
   render(){const c=this.ctx,w=this.width,h=this.height;if(!c||!w||!h)return;c.clearRect(0,0,w,h);c.fillStyle='#071721';c.fillRect(0,0,w,h);
     const {begin,rows}=this.viewport();const price={left:10,right:w-78,top:24,bottom:h-150},sub={top:h-116,bottom:h-29};
     const {low,high}=this.priceBounds();const py=v=>price.top+(high-v)/(high-low)*(price.bottom-price.top),bw=(price.right-price.left)/Math.max(1,rows.length),px=i=>price.left+(i+.5)*bw;
@@ -91,7 +102,26 @@ class Chart {
       const coord=p=>({x:px(Math.max(0,Math.min(rows.length-1,rows.findIndex(b=>b.timestamp>=p.timestamp) < 0 ? rows.length-1:rows.findIndex(b=>b.timestamp>=p.timestamp)))),y:py(p.price)});
       const a=coord(d.a),b=coord(d.b);c.strokeStyle='#5bdbff';c.lineWidth=1.8;c.beginPath();if(d.tool==='horizontalStraightLine'){c.moveTo(price.left,a.y);c.lineTo(price.right,a.y);}else if(d.tool==='fibonacciLine'){const top=Math.min(a.y,b.y),height=Math.abs(a.y-b.y);for(const ratio of [0,.236,.382,.5,.618,.786,1]){const y=top+height*ratio;c.moveTo(price.left,y);c.lineTo(price.right,y);c.fillStyle='#b6ecff';c.fillText(`${Math.round(ratio*100)}%`,price.left+6,y-3);}}else{c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);}c.stroke();}
     if(this.hover&&this.hover.x>=price.left&&this.hover.x<=price.right){const j=Math.min(rows.length-1,Math.max(0,Math.floor((this.hover.x-price.left)/bw))),b=rows[j];c.strokeStyle='#7493a1';c.setLineDash([3,3]);c.beginPath();c.moveTo(px(j),price.top);c.lineTo(px(j),sub.bottom);c.moveTo(price.left,this.hover.y);c.lineTo(price.right,this.hover.y);c.stroke();c.setLineDash([]);c.fillStyle='rgba(7,22,34,.96)';c.fillRect(price.left+3,price.top+4,Math.min(price.right-price.left-4,330),24);c.fillStyle=b.close>=b.open?UP:DOWN;c.font='10px ui-monospace,monospace';c.textAlign='left';c.fillText(`O ${fmt(b.open)}  H ${fmt(b.high)}  L ${fmt(b.low)}  C ${fmt(b.close)}`,price.left+7,price.top+20);}
-    const last=rows[rows.length-1],up=last.close>=last.open;c.fillStyle=up?UP:DOWN;c.fillRect(price.right+1,Math.max(price.top,Math.min(price.bottom-19,py(last.close)-8)),w-price.right-3,20);c.fillStyle='#041520';c.textAlign='center';c.font='bold 11px monospace';c.fillText(fmt(last.close),price.right+(w-price.right)/2,Math.max(price.top+13,Math.min(price.bottom-6,py(last.close)+5)));
+    // Guía de precio de mercado: tick WebSocket de la misma cotización que la etiqueta superior.
+    // No depende del cierre de vela y nunca conecta precio de otro par tras setSymbol.
+    const last=rows[rows.length-1];
+    const live=this.livePrice!==null?this.livePrice:last.close;
+    const rising=this.livePrice!==null?this.liveDirection!=='down':last.close>=last.open;
+    const guideColor=rising?UP:DOWN;
+    const rawY=py(live);
+    const lineInRange=rawY>=price.top&&rawY<=price.bottom;
+    const guideY=Math.max(price.top+1,Math.min(price.bottom-1,rawY));
+    if(lineInRange){
+      c.save();c.strokeStyle=guideColor;c.globalAlpha=.90;c.lineWidth=1.25;c.setLineDash([5,4]);
+      c.beginPath();c.moveTo(price.left,guideY);c.lineTo(price.right+1,guideY);c.stroke();c.restore();
+    }
+    const axisW=w-price.right-3,axisH=21;
+    const tagY=Math.max(price.top,Math.min(price.bottom-axisH,guideY-axisH/2));
+    c.fillStyle=guideColor;c.fillRect(price.right+1,tagY,axisW,axisH);
+    c.fillStyle='#041520';c.textAlign='center';c.font='bold 11px monospace';
+    const label=fmt(live,live<1?7:live<100?5:2);
+    c.fillText(label,price.right+1+axisW/2,tagY+14,axisW-5);
+    if(!lineInRange){c.fillStyle=guideColor;c.font='bold 11px monospace';c.fillText(rawY<price.top?'▲':'▼',price.right-6,guideY+4);}
   }
   destroy(){this.observer?.disconnect();this.activeSubscription?.unsubscribe?.();this.canvas.remove();}
 }

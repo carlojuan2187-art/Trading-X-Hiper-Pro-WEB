@@ -515,11 +515,13 @@ def _detect_simple_mtf_trigger(
 ) -> Tuple[bool, str, Dict[str, Any]]:
     if MTF_PENDING_SETUP_ENABLED:
         return find_pending_reset(direction=direction, o=o, h=h, l=l, c=c,
-            ema20=ema20, ema50=ema50, atr=atr, max_age=MTF_SETUP_MAX_AGE_BARS,
+            ema20=ema20, ema50=ema50, atr=atr,
+            max_age=(max(10, MTF_SETUP_MAX_AGE_BARS) if demo_trial else MTF_SETUP_MAX_AGE_BARS),
             touch_atr=(0.48 if demo_trial else RESET_TOUCH_TOL_ATR),
             break_atr=RESET_BREAK_TOL_ATR,
             confirm_atr=(0.28 if demo_trial else CONTINUATION_CONFIRM_TOL_ATR),
-            max_extension=TRIGGER_MAX_EMA20_EXTENSION_ATR)
+            max_extension=(max(1.10, TRIGGER_MAX_EMA20_EXTENSION_ATR)
+                           if demo_trial else TRIGGER_MAX_EMA20_EXTENSION_ATR))
     if len(c) < max(EMA_SLOW + 5, 80):
         return False, "NOT_ENOUGH_BARS", {}
 

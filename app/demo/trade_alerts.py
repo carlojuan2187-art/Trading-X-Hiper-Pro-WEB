@@ -141,6 +141,8 @@ async def dispatch_batch(bot, limit: int = 10) -> int:
             await asyncio.to_thread(_mark_failure, message['_id'], message['attempts'], False)
         else:
             await asyncio.to_thread(_mark_sent, message['_id'])
+            logger.info('DEMO Telegram alert delivered user=%s event=%s trade=%s',
+                        message['chat_id'], message['event'], message['trade_id'])
             count += 1
     return count
 

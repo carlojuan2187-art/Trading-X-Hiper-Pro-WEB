@@ -4405,7 +4405,8 @@ def _select_best_signal_from_scanner_shortlist(user_id: int, exclude_symbols: se
     shortlist_started_ts = time.time()
     limit = _signal_candidate_limit()
     fetch_limit = max(int(limit * SHORTLIST_FETCH_MULTIPLIER), int(limit))
-    shortlist = get_ranked_symbols(exclude_symbols=exclude_symbols, limit=fetch_limit)
+    shortlist = get_ranked_symbols(exclude_symbols=exclude_symbols, limit=fetch_limit,
+                                    execution_mode=execution_mode)
     shortlist_fetch_elapsed_s = time.time() - shortlist_started_ts
     if not shortlist:
         log("Scanner no devolvió candidatos", "WARN")

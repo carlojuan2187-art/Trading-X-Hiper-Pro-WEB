@@ -45,6 +45,11 @@ def safe_log(*args):
 
 _LAST_GOOD_RESULTS: List[dict] = []
 _LAST_UPDATE_TS: float = 0.0
+# Separación absoluta de los resultados del scanner entre DEMO experimental y LIVE.
+_DEMO_LAST_GOOD_RESULTS: List[dict] = []
+_DEMO_LAST_UPDATE_TS: float = 0.0
+# DEMO sigue exigiendo liquidez real en ambos lados del libro. No cambia LIVE.
+_DEMO_TOP_BOOK_MIN_NOTIONAL = env_float("DEMO_SCANNER_MIN_TOP_BOOK_NOTIONAL", 500.0, minimum=250.0)
 MAX_CACHE_AGE = 300  # 5 minutos
 SCANNER_HTTP_TIMEOUT_SECONDS = max(float(os.getenv("SCANNER_HTTP_TIMEOUT_SECONDS", "4.0") or 4.0), 1.0)
 SCANNER_HTTP_RETRIES = max(int(os.getenv("SCANNER_HTTP_RETRIES", "2") or 2), 1)
@@ -290,7 +295,11 @@ def _fetch_l2_quality(symbol: str) -> Optional[dict]:
 # RESULTADOS SCANNER
 # ============================================================
 
-def _get_live_results(exclude_symbols: Set[str]) -> Optional[List[dict]]:
+def _get_live_results(exclude_symbols: Set[str], *,
+                      execution_mode: str = "live") -> Optional[List[dict]]:
+    demo = execution_mode == "demo"
+    min_book_notional = (_DEMO_TOP_BOOK_MIN_NOTIONAL if demo
+                         else float(SCANNER_MIN_TOP_BOOK_NOTIONAL))
     markets = _fetch_markets()
     counters = Counter()
     if markets is None:
@@ -299,6 +308,8 @@ def _get_live_results(exclude_symbols: Set[str]) -> Optional[List[dict]]:
         return None
     prefiltered: List[dict] = []
     counters["markets"] = len(markets)
+    counters["mode_demo"] = int(demo)
+    counters["required_top_book_usdc"] = int(min_book_notional)
 
     for symbol, info in markets.items():
         if symbol in exclude_symbols:
@@ -343,7 +354,7 @@ def _get_live_results(exclude_symbols: Set[str]) -> Optional[List[dict]]:
         if spread_bps <= 0 or spread_bps > float(SCANNER_MAX_SPREAD_BPS):
             counters["spread_rejected"] += 1
             continue
-        if top_book < float(SCANNER_MIN_TOP_BOOK_NOTIONAL):
+        if top_book < min_book_notional:
             counters["top_book_rejected"] += 1
             continue
         row = dict(parsed)
@@ -388,13 +399,31 @@ def _refresh_scored_results(exclude_symbols: Set[str]) -> List[dict]:
 # ORDENACIÓN DE CANDIDATOS
 # ============================================================
 
-def _get_scored_results(exclude_symbols: Set[str]) -> List[dict]:
-    # Shared market snapshot. Account-specific exclusions are applied afterwards.
+def _get_scored_results(exclude_symbols: Set[str], *, execution_mode: str = "live") -> List[dict]:
+    # Las dos rutas tienen caché propia: LIVE nunca reutiliza una aprobación L2
+    # calculada con el umbral de pruebas DEMO.
+    global _DEMO_LAST_GOOD_RESULTS, _DEMO_LAST_UPDATE_TS
     with _scan_lock:
-        if _LAST_UPDATE_TS > 0 and time.time() - _LAST_UPDATE_TS < _SCAN_REFRESH_SECONDS:
-            results = list(_LAST_GOOD_RESULTS)
+        if execution_mode == "demo":
+            now = time.time()
+            if _DEMO_LAST_UPDATE_TS > 0 and now - _DEMO_LAST_UPDATE_TS < _SCAN_REFRESH_SECONDS:
+                results = list(_DEMO_LAST_GOOD_RESULTS)
+            else:
+                fresh = _get_live_results(set(), execution_mode="demo")
+                if fresh is not None:
+                    _DEMO_LAST_GOOD_RESULTS = list(fresh)
+                    _DEMO_LAST_UPDATE_TS = now
+                    results = fresh
+                elif _DEMO_LAST_GOOD_RESULTS and now - _DEMO_LAST_UPDATE_TS <= MAX_CACHE_AGE:
+                    results = list(_DEMO_LAST_GOOD_RESULTS)
+                else:
+                    results = []
         else:
-            results = _refresh_scored_results(set())
+            # Ruta LIVE sin cambios.
+            if _LAST_UPDATE_TS > 0 and time.time() - _LAST_UPDATE_TS < _SCAN_REFRESH_SECONDS:
+                results = list(_LAST_GOOD_RESULTS)
+            else:
+                results = _refresh_scored_results(set())
         return [row for row in results if row['symbol'] not in exclude_symbols]
 
 
@@ -432,9 +461,10 @@ def _ordered_candidates(results: List[dict], exclude_symbols: Set[str]) -> List[
 # API PRINCIPAL
 # ============================================================
 
-def get_ranked_symbols(exclude_symbols: Optional[Set[str]] = None, limit: Optional[int] = None) -> List[dict]:
+def get_ranked_symbols(exclude_symbols: Optional[Set[str]] = None, limit: Optional[int] = None,
+                       *, execution_mode: str = "live") -> List[dict]:
     exclude_symbols = exclude_symbols or set()
-    results = _get_scored_results(exclude_symbols)
+    results = _get_scored_results(exclude_symbols, execution_mode=execution_mode)
     ordered = _ordered_candidates(results, exclude_symbols)
 
     if limit is not None and limit > 0:

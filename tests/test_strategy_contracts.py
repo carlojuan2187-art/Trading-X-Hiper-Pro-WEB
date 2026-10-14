@@ -441,3 +441,20 @@ class DemoBiasExperimentTests(unittest.TestCase):
             outcome=mtf._evaluate_market_context(trial)
             self.assertTrue(outcome['signal'], outcome)
             self.assertEqual(outcome['h1_mode'],'demo_early_transition')
+
+    def test_demo_m5_reset_window_is_isolated(self):
+        # Verifica los parámetros reales que se transmiten al reset,
+        # conservando intactos los límites LIVE.
+        bars = [100.0] * 22
+        kwargs = dict(direction='long', o=bars, h=bars, l=bars, c=bars,
+                      v=bars, ema20=bars, ema50=bars, ema200=bars, atr=1.0)
+        with patch.object(mtf, 'find_pending_reset', return_value=(False,'NO_VALID_PENDING_RESET',{})) as fn:
+            mtf._detect_simple_mtf_trigger(**kwargs)
+            live = dict(fn.call_args.kwargs)
+            mtf._detect_simple_mtf_trigger(demo_trial=True, **kwargs)
+            demo = dict(fn.call_args.kwargs)
+        self.assertEqual(live['max_age'], mtf.MTF_SETUP_MAX_AGE_BARS)
+        self.assertEqual(live['max_extension'], mtf.TRIGGER_MAX_EMA20_EXTENSION_ATR)
+        self.assertEqual(demo['max_age'], max(10, mtf.MTF_SETUP_MAX_AGE_BARS))
+        self.assertEqual(demo['max_extension'], max(1.10, mtf.TRIGGER_MAX_EMA20_EXTENSION_ATR))
+        self.assertEqual(live['break_atr'], demo['break_atr'])

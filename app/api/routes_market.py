@@ -19,7 +19,7 @@ def no_market_error(function):
 
 
 @router.get('/instruments')
-def instruments(query: str = Query(default='', max_length=48), limit: int = Query(default=100, ge=1, le=500),
+def instruments(query: str = Query(default='', max_length=48), limit: int = Query(default=2000, ge=1, le=2000),
                 session: dict = Depends(require_session)) -> dict:
     def fetch():
         rows = terminal.catalog()

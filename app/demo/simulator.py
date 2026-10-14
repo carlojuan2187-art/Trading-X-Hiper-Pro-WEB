@@ -97,6 +97,18 @@ def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict
     notional = margin * float(LEVERAGE)
     if notional < float(engine.MIN_NOTIONAL_USDC):
         return None
+    # DEMO permite explorar más libros, pero no simula un fill cuyo notional
+    # sobrepase la profundidad disponible observada en el scanner.
+    # La referencia L2 puede envejecer: se conserva además el control de
+    # spread y el modelo de slippage aplicado al bid/ask real del WebSocket.
+    scanner_book = (selected.get('scanner') or {}).get('top_book_notional')
+    if scanner_book is not None:
+        try:
+            available_book = float(scanner_book)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(available_book) or available_book < 1.5 * notional:
+            return None
     entry = fill_price('buy' if direction == 'long' else 'sell', bid, ask)
     drift_ok, _ = engine._entry_drift_check(signal=signal, current_price=entry, direction=direction)
     if not drift_ok:

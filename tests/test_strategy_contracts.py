@@ -84,6 +84,21 @@ class StrategyContracts(unittest.TestCase):
         self.assertEqual(mtf._bias_from_tf(tf,adx_min=11)[0],'none')
         self.assertEqual(mtf._bias_from_tf(tf,adx_min=11,require_slow_stack=False)[0],'long')
 
+    def test_pending_m5_tolerance_expands_only_in_demo(self):
+        data = dict(direction='long', o=[], h=[], l=[], c=[], v=[],
+                    ema20=[], ema50=[], ema200=[], atr=1)
+        with patch.object(mtf, 'find_pending_reset', return_value=(False, 'NO_VALID_PENDING_RESET', {})) as reset:
+            mtf._detect_simple_mtf_trigger(**data, demo_trial=False)
+            live = dict(reset.call_args.kwargs)
+            mtf._detect_simple_mtf_trigger(**data, demo_trial=True)
+            demo = dict(reset.call_args.kwargs)
+        self.assertAlmostEqual(live['touch_atr'], mtf.RESET_TOUCH_TOL_ATR)
+        self.assertAlmostEqual(live['confirm_atr'], mtf.CONTINUATION_CONFIRM_TOL_ATR)
+        self.assertAlmostEqual(demo['touch_atr'], .58)
+        self.assertAlmostEqual(demo['confirm_atr'], .32)
+        self.assertEqual(demo['break_atr'], live['break_atr'])
+        self.assertEqual(demo['max_extension'], live['max_extension'])
+
     def test_policy_matches_strategies(self):
         self.assertEqual(rejection_reason('HYPE-PERP'),'MEME_SYMBOL_BLOCKED')
         self.assertIn('HYPE',mtf.BLOCKED_MEME_KEYWORDS)

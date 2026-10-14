@@ -48,8 +48,9 @@ _LAST_UPDATE_TS: float = 0.0
 # Separación absoluta de los resultados del scanner entre DEMO experimental y LIVE.
 _DEMO_LAST_GOOD_RESULTS: List[dict] = []
 _DEMO_LAST_UPDATE_TS: float = 0.0
-# DEMO sigue exigiendo liquidez real en ambos lados del libro. No cambia LIVE.
-_DEMO_TOP_BOOK_MIN_NOTIONAL = env_float("DEMO_SCANNER_MIN_TOP_BOOK_NOTIONAL", 500.0, minimum=250.0)
+# DEMO uses a smaller book-size floor; the simulator STILL checks 1.5x
+# the actual paper notional before opening. LIVE keeps its 2,000 USDC floor.
+_DEMO_TOP_BOOK_MIN_NOTIONAL = env_float("DEMO_SCANNER_MIN_TOP_BOOK_NOTIONAL", 250.0, minimum=250.0)
 MAX_CACHE_AGE = 300  # 5 minutos
 SCANNER_HTTP_TIMEOUT_SECONDS = max(float(os.getenv("SCANNER_HTTP_TIMEOUT_SECONDS", "4.0") or 4.0), 1.0)
 SCANNER_HTTP_RETRIES = max(int(os.getenv("SCANNER_HTTP_RETRIES", "2") or 2), 1)

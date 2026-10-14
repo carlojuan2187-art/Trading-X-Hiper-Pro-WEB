@@ -516,9 +516,11 @@ def _detect_simple_mtf_trigger(
     if MTF_PENDING_SETUP_ENABLED:
         return find_pending_reset(direction=direction, o=o, h=h, l=l, c=c,
             ema20=ema20, ema50=ema50, atr=atr, max_age=MTF_SETUP_MAX_AGE_BARS,
-            touch_atr=(0.48 if demo_trial else RESET_TOUCH_TOL_ATR),
+            # DEMO: narrow trial tolerances for legitimate near-EMA20 resets
+            # and closed-bar confirmations. Prior confirmed setups cannot be reused.
+            touch_atr=(0.58 if demo_trial else RESET_TOUCH_TOL_ATR),
             break_atr=RESET_BREAK_TOL_ATR,
-            confirm_atr=(0.28 if demo_trial else CONTINUATION_CONFIRM_TOL_ATR),
+            confirm_atr=(0.32 if demo_trial else CONTINUATION_CONFIRM_TOL_ATR),
             max_extension=TRIGGER_MAX_EMA20_EXTENSION_ATR)
     if len(c) < max(EMA_SLOW + 5, 80):
         return False, "NOT_ENOUGH_BARS", {}

@@ -122,6 +122,16 @@ class ScannerFunnelTest(unittest.TestCase):
         self.assertEqual(scanner._DEMO_LAST_GOOD_RESULTS, demo)
         self.assertEqual(scanner._LAST_GOOD_RESULTS, [])
 
+    def test_demo_medium_depth_is_eligible_without_loosening_live(self):
+        scanner = self.scanner
+        self.assertEqual(scanner._DEMO_TOP_BOOK_MIN_NOTIONAL, 250.0)
+        markets = {'BTC-PERP': market()}
+        with patch.object(scanner, '_fetch_markets', return_value=markets), \
+             patch.object(scanner, '_fetch_l2_quality', return_value=quality(book=300)):
+            self.assertEqual(len(scanner._get_live_results(set(), execution_mode='demo')), 1)
+            self.assertEqual(scanner._get_live_results(set(), execution_mode='live'), [])
+        self.assertEqual(scanner._LAST_GOOD_RESULTS, [])
+
     def test_demo_book_filter_still_blocks_very_thin_or_wide_books(self):
         scanner = self.scanner
         markets = {"BTC-PERP": market(), "ETH-PERP": market()}

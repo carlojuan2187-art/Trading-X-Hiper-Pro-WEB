@@ -22,6 +22,14 @@ from app.demo.settings import DEMO_ENABLED, DEMO_SCAN_SECONDS, DEMO_MAX_USERS_PE
 from app.demo.credentials import user_ready
 from app.demo.market_events import decode_book
 from app.demo.simulator import open_position, update_position, entry_gate_reason
+from app.hyperliquid_client import norm_coin
+
+
+def _ws_coin(symbol: str) -> str:
+    """Hyperliquid l2Book uses the exchange coin, not our -PERP display symbol."""
+    return norm_coin(symbol)
+
+
 
 logger = logging.getLogger(__name__)
 LEASES = db['demo_worker_leases']
@@ -123,7 +131,17 @@ class DemoMarketRunner:
 
     def protected_positions(self, symbol: str, bid: float, ask: float) -> tuple[int, int]:
         marked = closed = 0
-        for account in ledger.COLLECTION.find({'position.symbol': symbol}):
+        coin = _ws_coin(symbol)
+        if not coin:
+            return marked, closed
+        # Existing DEMO positions retain their original symbol for UI/history.
+        # Match both current -PERP and legacy plain-coin records without a collection scan.
+        symbol_query = {'$or': [
+            {'position.symbol': coin},
+            {'position.symbol': f'{coin}-PERP'},
+            {'position.symbol': f'{coin}_PERP'},
+        ]}
+        for account in ledger.COLLECTION.find(symbol_query):
             try:
                 updated = update_position(account, bid, ask)
                 if not updated:
@@ -149,9 +167,12 @@ class DemoMarketRunner:
     def open_if_pending(self, symbol: str, bid: float, ask: float) -> int:
         opened = 0
         now = time.monotonic()
-        # Consume únicamente las señales del símbolo recibido y de su propietario.
+        # Compare exchange coins; the strategy keeps its -PERP symbol in Mongo.
+        coin = _ws_coin(symbol)
+        if not coin:
+            return 0
         for uid, (selected, issued_at) in list(self.pending_by_user.items()):
-            if str(selected.get('symbol', '')).upper() != symbol:
+            if _ws_coin(str(selected.get('symbol') or '')) != coin:
                 continue
             self.pending_by_user.pop(uid, None)
             # Una señal que esperó demasiado no equivale a la ejecución LIVE inmediata.
@@ -166,6 +187,8 @@ class DemoMarketRunner:
                 if updated:
                     ledger.save(current, updated)
                     opened += 1
+                else:
+                    logger.info('DEMO signal rejected at final execution user=%s symbol=%s', uid, coin)
             except ledger.Conflict:
                 logger.info('DEMO concurrent open avoided user=%s', uid)
             except Exception:
@@ -204,12 +227,14 @@ class DemoMarketRunner:
         self.pending_by_user, self.scan_offset = self.collect_signals()
 
     async def subscribe_new(self, ws) -> None:
-        wanted = {str(a['position']['symbol']).upper()
+        wanted = {_ws_coin(str(a['position']['symbol']))
                   for a in ledger.COLLECTION.find({'position_open': True}) if a.get('position')}
+        wanted.discard('')
         # Solo símbolos de señales frescas. Un WS sin cotización NO puede abrir.
         now = time.monotonic()
         self.pending_by_user = {uid: p for uid, p in self.pending_by_user.items() if now - p[1] <= 30}
-        wanted.update(str(selected['symbol']).upper() for selected, _ in self.pending_by_user.values())
+        wanted.update(_ws_coin(str(selected['symbol'])) for selected, _ in self.pending_by_user.values())
+        wanted.discard('')
         # Protección de límites de upstream: si se supera el máximo, abortar
         # para no fingir que el motor puede gestionar todos los SL.
         if len(wanted) > 100:

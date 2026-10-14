@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from pymongo.errors import DuplicateKeyError
 
-from app.database import db
+from app.database import db, touch_runtime_component
 from app.demo import ledger
 from app.demo.settings import DEMO_ENABLED, DEMO_SCAN_SECONDS
 from app.demo.credentials import user_ready
@@ -216,6 +216,7 @@ class DemoMarketRunner:
             self.next_scan = time.monotonic()
             self.next_lease = time.monotonic()
             self.next_ping = time.monotonic() + 25
+            self.next_status = time.monotonic()
             if not await asyncio.to_thread(acquire_lease):
                 raise RuntimeError('La réplica DEMO no es el líder')
             await self.subscribe_new(ws)
@@ -225,6 +226,13 @@ class DemoMarketRunner:
                     if not await asyncio.to_thread(acquire_lease):
                         raise RuntimeError('Lease perdido: se detiene gestión DEMO')
                     self.next_lease = now + 15
+                # Publicar latidos del worker DEMO; no publicar nombres LIVE antiguos.
+                if now >= self.next_status:
+                    for component in ('demo_worker', 'demo_scanner'):
+                        await asyncio.to_thread(touch_runtime_component, component, 'online',
+                            metadata={'mode': 'DEMO', 'transport': 'hyperliquid_ws', 'leader': True,
+                                      'subscribed_symbols': len(self.subscribed)})
+                    self.next_status = time.monotonic() + 45
                 # Hyperliquid cierra las conexiones sin actividad; mantener
                 # alive incluso si todavía no hay símbolos con posiciones.
                 if now >= self.next_ping:
@@ -237,7 +245,7 @@ class DemoMarketRunner:
                         logger.exception('Scanner DEMO failed; without new entries')
                     self.next_scan = time.monotonic() + DEMO_SCAN_SECONDS
                     await self.subscribe_new(ws)
-                timeout = min(self.next_scan, self.next_lease, self.next_ping) - time.monotonic()
+                timeout = min(self.next_scan, self.next_lease, self.next_ping, self.next_status) - time.monotonic()
                 try:
                     raw = await asyncio.wait_for(ws.recv(), timeout=max(.01, timeout))
                 except asyncio.TimeoutError:

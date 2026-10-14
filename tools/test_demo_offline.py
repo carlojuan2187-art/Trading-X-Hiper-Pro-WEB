@@ -308,7 +308,7 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertIsNone(ledger.read(7)['position'])
         self.assertEqual(runner.pending_by_user, {})
 
-    def test_paused_or_risk_blocked_account_never_executes_pending_signal(self):
+    def test_paused_account_blocks_but_old_risk_cooldown_does_not(self):
         ledger.change_status(7, active=True)
         runner = worker.DemoMarketRunner()
         runner.pending_by_user = {7: (signal(), worker.time.monotonic())}
@@ -317,10 +317,51 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertIsNone(ledger.read(7)['position'])
         account = ledger.change_status(7, active=True)
         account['risk_cooldown_until'] = '2099-01-01T00:00:00+00:00'
+        account['risk_cooldown_reason'] = 'USER_CONSEC_LOSSES_10'
         ledger.save(ledger.read(7), account)
-        self.assertEqual(simulator.entry_gate_reason(ledger.read(7)), 'RISK_COOLDOWN')
+        self.assertIsNone(simulator.entry_gate_reason(ledger.read(7)))
         runner.pending_by_user = {7: (signal(), worker.time.monotonic())}
-        self.assertEqual(runner.open_if_pending('SOL', 100, 100.1), 0)
+        self.assertEqual(runner.open_if_pending('SOL', 100, 100.1), 1)
+        self.assertEqual(simulator.entry_gate_reason(ledger.read(7)), 'NOT_ELIGIBLE')
+
+    def test_demo_no_fixed_cooldown_or_daily_hourly_trade_limits(self):
+        from datetime import datetime, timezone, timedelta
+        acc = ledger.change_status(7, active=True)
+        now = datetime.now(timezone.utc)
+        acc.update({
+            'entry_timestamps': [(now - timedelta(minutes=i % 30)).isoformat() for i in range(30)],
+            'last_entry_at': now.isoformat(), 'last_close_at': now.isoformat(),
+            'risk_consecutive_losses': 10,
+            'risk_cooldown_until': (now + timedelta(days=8)).isoformat(),
+            'risk_cooldown_reason': 'USER_PF_0.25_WIN5',
+        })
+        self.assertIsNone(simulator.entry_gate_reason(acc, now=now))
+        self.assertIsNotNone(simulator.open_position(acc, signal(), 100, 100.1))
+
+    def test_loss_immediate_reentry_without_cooldown_but_tracks_losses(self):
+        acc = ledger.change_status(7, active=True)
+        opened = simulator.open_position(acc, signal(), 100, 100.1)
+        self.assertIsNotNone(opened)
+        closed = simulator.update_position(opened, 97, 97.1)
+        self.assertIsNone(closed['position'])
+        self.assertEqual(closed['losses'], 1)
+        self.assertEqual(closed['risk_consecutive_losses'], 1)
+        self.assertIsNone(closed.get('risk_cooldown_until'))
+        self.assertIsNone(closed.get('risk_cooldown_reason'))
+        self.assertIsNone(simulator.entry_gate_reason(closed))
+        self.assertIsNotNone(simulator.open_position(closed, signal(), 100, 100.1))
+
+    def test_nonnegotiable_demo_guards_remain(self):
+        acc = ledger.change_status(7, active=True)
+        acc['balance_usdc'] = engine.MIN_CAPITAL_USDC - .01
+        self.assertEqual(simulator.entry_gate_reason(acc), 'MIN_CAPITAL')
+        acc['balance_usdc'] = 100
+        self.assertIsNone(simulator.entry_gate_reason(acc))
+        acc['position'] = {'symbol':'SOL'}
+        self.assertEqual(simulator.entry_gate_reason(acc), 'NOT_ELIGIBLE')
+        acc['position'] = None
+        acc['enabled'] = False
+        self.assertEqual(simulator.entry_gate_reason(acc), 'NOT_ELIGIBLE')
 
     def test_deep_scan_is_per_user_and_rotates_fairly(self):
         for uid in range(1, 9):
@@ -419,11 +460,13 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertFalse(client.get('/api/v1/demo').json()['enabled'])
         self.assertTrue(ledger.read(7)['enabled'])
 
-    def test_does_not_reenter_immediately_after_close(self):
+    def test_new_signal_may_enter_immediately_after_profitable_close(self):
         acc = ledger.change_status(7, active=True)
         opened = simulator.open_position(acc, signal(), 100, 100.1)
         closed = simulator.update_position(opened, 104.2, 104.3)
-        self.assertIsNone(simulator.open_position(closed, signal(), 100, 100.1))
+        self.assertIsNone(closed['position'])
+        self.assertIsNone(simulator.entry_gate_reason(closed))
+        self.assertIsNotNone(simulator.open_position(closed, signal(), 100, 100.1))
 
 
 if __name__ == '__main__':

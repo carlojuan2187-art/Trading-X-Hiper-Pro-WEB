@@ -212,7 +212,7 @@ class ConfirmedH1TransitionTests(unittest.TestCase):
     def test_transition_blocks_weak_trend_and_single_bar_bounce(self):
         for change in ('adx','previous_close','recent_slope'):
             tf=self.short_context()
-            if change=='adx':tf['adx']=17
+            if change=='adx':tf['adx']=15  # El umbral efectivo de transición LIVE es 16
             if change=='previous_close':tf['c'][-2]=103
             if change=='recent_slope':tf['ema50'][-2]=100.5
             with patch.object(mtf,'MTF_H1_TRANSITION_ENABLED',True), patch.object(mtf,'MTF_H1_REQUIRE_EMA200',True):
@@ -331,3 +331,70 @@ class RejectionEvidenceTests(unittest.TestCase):
         self.assertGreater(diag['confirm_close'], diag['confirm_open'])
         self.assertFalse(diag['reclaim_ok'])
         self.assertTrue(diag['reset_touched'])
+
+
+class DemoBiasExperimentTests(unittest.TestCase):
+    """La flexibilización alcanza sólo DEMO, sin alterar la ruta LIVE."""
+
+    @staticmethod
+    def trend(*, direction='long', m15=False):
+        sign = 1 if direction == 'long' else -1
+        # EMA50 sigue al lado contrario de EMA200; todo lo demás cumple.
+        base = 100
+        c = [base + sign*1.3] * 6 + [base + sign*1.5]
+        e20 = [base + sign*(1.0 - .10*(6-i)) for i in range(7)]
+        e50 = [base + sign*(.65 - .05*(6-i)) for i in range(7)]
+        e200 = [base + sign*1.8] * 7
+        return dict(c=c,ema20=e20,ema50=e50,ema200=e200,adx=25,atr=1)
+
+    def test_demo_h1_early_transition_needs_fast_trend_and_recent_slopes(self):
+        tf=self.trend()
+        # La segunda vela previa no confirma necesariamente la dirección:
+        # en DEMO basta el cierre actual si hay ADX y pendientes consistentes.
+        tf['c'][-2] = 99.0
+        self.assertEqual(mtf._h1_bias(tf)[0], 'none')
+        direction, diag=mtf._h1_bias(tf,demo_trial=True)
+        self.assertEqual(direction, 'long',diag)
+        self.assertEqual(diag['h1_mode'], 'demo_early_transition')
+        tf['adx']=10
+        self.assertEqual(mtf._h1_bias(tf,demo_trial=True)[0],'none')
+        tf['adx']=25
+        tf['ema50'][-2]=tf['ema50'][-1] + .1
+        self.assertEqual(mtf._h1_bias(tf,demo_trial=True)[0],'none')
+
+    def test_demo_m15_accepts_only_slow_ema_veto(self):
+        tf=self.trend()
+        self.assertEqual(mtf._m15_confirmation(tf,'long')[0], 'none')
+        direction, diag=mtf._m15_confirmation(tf,'long',demo_trial=True)
+        self.assertEqual(direction,'long',diag)
+        self.assertEqual(diag['m15_mode'],'demo_fast_trend_confirmed')
+        tf['adx']=12
+        self.assertEqual(mtf._m15_confirmation(tf,'long',demo_trial=True)[0],'none')
+        tf['adx']=25
+        tf['c'][-2]=tf['ema20'][-2]-1
+        self.assertEqual(mtf._m15_confirmation(tf,'long',demo_trial=True)[0],'none')
+        tf=self.trend()
+        tf['ema20'][-1]=tf['ema50'][-1]-0.1
+        self.assertEqual(mtf._m15_confirmation(tf,'long',demo_trial=True)[0],'none')
+
+    def test_short_mirrors_long(self):
+        tf=self.trend(direction='short')
+        self.assertEqual(mtf._m15_confirmation(tf,'short')[0], 'none')
+        self.assertEqual(mtf._m15_confirmation(tf,'short',demo_trial=True)[0], 'short')
+        tf['c'][-2]=101
+        self.assertEqual(mtf._h1_bias(tf)[0],'none')
+        self.assertEqual(mtf._h1_bias(tf,demo_trial=True)[0],'short')
+
+    def test_demo_eval_passes_mode_without_touching_live(self):
+        from copy import deepcopy
+        ctx=StrategyContracts().context(); base=ctx['timeframes']['5m']; h1=deepcopy(base)
+        h1['ema200']=[101]*len(h1['c'])
+        h1['c'][-2]=98
+        def resolve(symbol,interval,*args,**kwargs):
+            return h1 if interval=='1h' else base
+        with patch.object(mtf,'_resolve_tf_snapshot',side_effect=resolve):
+            self.assertEqual(mtf._evaluate_market_context(ctx)['reason'],'NO_H1_BIAS')
+            trial=dict(ctx,_execution_mode='demo')
+            outcome=mtf._evaluate_market_context(trial)
+            self.assertTrue(outcome['signal'], outcome)
+            self.assertEqual(outcome['h1_mode'],'demo_early_transition')

@@ -291,6 +291,39 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertEqual(client.get('/api/v1/demo').json()['initial_equity_usdc'], 100)
         self.assertEqual(ledger.read(7)['initial_equity_usdc'], 250)
 
+    def test_trade_audit_favorable_adverse_and_close_snapshot(self):
+        account = ledger.change_status(7, active=True)
+        opened = simulator.open_position(account, signal(), 100, 100.1)
+        pos = opened['position']
+        self.assertEqual(pos['audit_quotes'], 0)
+        good = simulator.update_position(opened, 102, 102.1)
+        self.assertGreater(good['position']['audit_mfe_usdc'], 0)
+        self.assertEqual(good['position']['audit_mae_usdc'], 0)
+        bad = simulator.update_position(good, 99, 99.1)
+        self.assertLess(bad['position']['audit_mae_usdc'], 0)
+        self.assertGreaterEqual(bad['position']['audit_mfe_pct'], good['position']['audit_mfe_pct'])
+        closed = simulator.update_position(bad, 98, 98.1)
+        history = closed['history'][-1]
+        self.assertEqual(history['audit_quotes'], 3)
+        self.assertGreater(history['audit_mfe_pct'], 0)
+        self.assertLess(history['audit_mae_pct'], 0)
+        self.assertAlmostEqual(history['audit_total_fees_usdc'],
+            history['entry_fee_usdc'] + history['exit_fee_usdc'], places=6)
+
+    def test_worker_buffers_extrema_between_persisted_quotes(self):
+        account = ledger.change_status(7, active=True)
+        opened = simulator.open_position(account, signal(), 100, 100.1)
+        ledger.save(account, opened)
+        runner = worker.DemoMarketRunner()
+        runner.protected_positions('SOL', 100.02, 100.12)
+        high = runner.audit_pending[(7, opened['position']['id'])]['audit_mfe_pct']
+        # This tiny favorable move stays buffered without Mongo per book.
+        self.assertGreaterEqual(high, 0)
+        runner.protected_positions('SOL', 98, 98.1)
+        trade = ledger.read(7)['history'][-1]
+        self.assertEqual(trade['audit_quotes'], 2)
+        self.assertGreaterEqual(trade['audit_mfe_pct'], high)
+
     def test_long_full_lifecycle_with_net_fees(self):
         acc = ledger.change_status(7, active=True)
         opened = simulator.open_position(acc, signal(), 100, 100.1)

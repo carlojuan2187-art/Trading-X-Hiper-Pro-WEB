@@ -126,6 +126,10 @@ class DemoMarketRunner:
         # user_id -> (selected_signal, monotonically-ordered queue timestamp)
         self.pending_by_user: dict[int, tuple[dict, float]] = {}
         self.scan_offset = 0
+        # In-memory full-resolution extrema; flush at most every 30s or on
+        # material mark movement. Always merge into the final close snapshot.
+        self.audit_pending: dict[tuple[int, str], dict] = {}
+        self.audit_flush_at: dict[tuple[int, str], float] = {}
         self.next_scan = time.monotonic()  # scanner es candle-driven, no polling de precios
         self.next_lease = time.monotonic()
 
@@ -142,23 +146,61 @@ class DemoMarketRunner:
             {'position.symbol': f'{coin}_PERP'},
         ]}
         for account in ledger.COLLECTION.find(symbol_query):
+            key = (int(account['_id']), str(account['position'].get('id') or ''))
+            audit_fields = (
+                'audit_mfe_pct', 'audit_mae_pct', 'audit_mfe_usdc',
+                'audit_mae_usdc', 'audit_quotes', 'audit_last_quote_at',
+                'audit_max_quote_gap_seconds', 'audit_quote_gaps_over_10s',
+            )
             try:
-                updated = update_position(account, bid, ask)
+                snapshot = deepcopy(account)
+                if key in self.audit_pending:
+                    snapshot['position'].update(self.audit_pending[key])
+                updated = update_position(snapshot, bid, ask)
                 if not updated:
                     continue
-                if not updated.get('position'):
-                    # Cada evento se valida: jamás saltar un tick con posible TP/SL.
-                    ledger.save(account, updated)
+                measured_position = updated.get('position')
+                if not measured_position:
+                    # Closed history includes unsaved in-memory extremes and
+                    # latest gap counters from EVERY observed WS quote.
+                    saved = ledger.save(account, updated)
+                    self.audit_pending.pop(key, None)
+                    self.audit_flush_at.pop(key, None)
+                    trade = saved['history'][-1]
+                    logger.info('DEMO_TRADE_AUDIT_CLOSE user=%s data=%s',
+                                account['_id'], json.dumps({
+                                    k: trade.get(k) for k in (
+                                        'id', 'symbol', 'direction', 'strategy_id',
+                                        'entry_price', 'exit_price', 'stop_price',
+                                        'target_price', 'rr', 'signal_score',
+                                        'opened_at', 'closed_at', 'close_reason',
+                                        'pnl_gross_usdc', 'pnl_net_usdc',
+                                        'entry_fee_usdc', 'exit_fee_usdc',
+                                        'audit_mfe_pct', 'audit_mae_pct',
+                                        'audit_mfe_usdc', 'audit_mae_usdc',
+                                        'audit_quotes', 'audit_max_quote_gap_seconds',
+                                        'audit_quote_gaps_over_10s',
+                                    )
+                                }, sort_keys=True, default=str))
                     closed += 1
                 else:
-                    # No escribimos cada book a Mongo: un precio mueve la UI
-                    # mediante WS, y un cambio material queda registrado.
+                    # Keep exact WS extrema between Mongo writes. Periodic
+                    # persistence bounds loss of telemetry on worker restart.
+                    self.audit_pending[key] = {
+                        field: measured_position.get(field) for field in audit_fields
+                        if field in measured_position
+                    }
                     before = account['position'].get('mark_price')
-                    mark = updated['position'].get('mark_price')
-                    if not before or abs(float(mark) / float(before) - 1) >= .0005:
+                    mark = measured_position.get('mark_price')
+                    due = time.monotonic() - self.audit_flush_at.get(key, 0.0) >= 30.0
+                    changed = not before or abs(float(mark) / float(before) - 1) >= .0005
+                    if due or changed:
                         ledger.save(account, updated)
+                        self.audit_flush_at[key] = time.monotonic()
                         marked += 1
             except ledger.Conflict:
+                # Don't retain stale, unsaved telemetry after CAS failure.
+                self.audit_pending.pop(key, None)
                 logger.info('DEMO book concurrent state symbol=%s', symbol)
             except Exception:
                 logger.exception('DEMO book handling failed symbol=%s', symbol)
@@ -186,8 +228,21 @@ class DemoMarketRunner:
                 reason: dict = {}
                 updated = open_position(current, selected, bid, ask, rejection=reason)
                 if updated:
-                    ledger.save(current, updated)
+                    saved = ledger.save(current, updated)
                     opened += 1
+                    pos = saved['position']
+                    logger.info('DEMO_TRADE_AUDIT_OPEN user=%s data=%s', uid, json.dumps({
+                        k: pos.get(k) for k in (
+                            'id', 'symbol', 'direction', 'strategy_id',
+                            'regime_id', 'router_decision', 'signal_score',
+                            'scanner_score', 'signal_reference_price',
+                            'entry_price', 'stop_price', 'target_price', 'rr',
+                            'margin_usdc', 'leverage', 'notional_usdc',
+                            'entry_spread_bps', 'slippage_model_bps',
+                            'entry_fee_model_bps', 'entry_fee_usdc',
+                            'opened_at',
+                        )
+                    }, sort_keys=True, default=str))
                 else:
                     logger.info('DEMO final entry rejected user=%s symbol=%s diag=%s',
                                 uid, coin, json.dumps(reason, sort_keys=True, default=str))
@@ -283,6 +338,10 @@ class DemoMarketRunner:
             if not await asyncio.to_thread(acquire_lease):
                 raise RuntimeError('La réplica DEMO no es el líder')
             await self.subscribe_new(ws)
+            # Once per successful leader start: bounded read-only 1m replay
+            # of the five most recent retained DEMO closes.
+            from app.demo.audit import replay_recent_history_to_logs
+            asyncio.create_task(asyncio.to_thread(replay_recent_history_to_logs))
             scan_task = None
             while True:
                 now = time.monotonic()

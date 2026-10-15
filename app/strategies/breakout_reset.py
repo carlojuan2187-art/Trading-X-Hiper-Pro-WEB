@@ -36,6 +36,12 @@ ATR_PCT_MAX = env_float("MTF_ATR_PCT_MAX", 0.018)
 TREND_STACK_MIN_PCT = 0.00030
 RESET_LOOKBACK_BARS = env_int("MTF_RESET_LOOKBACK_BARS", 5, 1)
 MTF_PENDING_SETUP_ENABLED = env_bool("MTF_PENDING_SETUP_ENABLED", True)
+# LAB isolation: identical strategy decisions to LIVE by default. These
+# experimental parameters are applied only to DEMO after explicit opt-in.
+DEMO_STRATEGY_EXPERIMENTAL = env_bool("DEMO_STRATEGY_EXPERIMENTAL", False)
+DEMO_MTF_RESET_TOUCH_TOL_ATR = env_float("DEMO_MTF_RESET_TOUCH_TOL_ATR", 0.58, minimum=0.0)
+DEMO_MTF_CONTINUATION_CONFIRM_TOL_ATR = env_float(
+    "DEMO_MTF_CONTINUATION_CONFIRM_TOL_ATR", 0.32, minimum=0.0)
 MTF_SETUP_MAX_AGE_BARS = env_int("MTF_SETUP_MAX_AGE_BARS", 8, 1)
 MTF_H1_PULLBACK_ENABLED = env_bool("MTF_H1_PULLBACK_ENABLED", True)
 MTF_H1_PULLBACK_MAX_ATR = env_float("MTF_H1_PULLBACK_MAX_ATR", 0.50, maximum=1.0)
@@ -518,9 +524,9 @@ def _detect_simple_mtf_trigger(
             ema20=ema20, ema50=ema50, atr=atr, max_age=MTF_SETUP_MAX_AGE_BARS,
             # DEMO: narrow trial tolerances for legitimate near-EMA20 resets
             # and closed-bar confirmations. Prior confirmed setups cannot be reused.
-            touch_atr=(0.58 if demo_trial else RESET_TOUCH_TOL_ATR),
+            touch_atr=(DEMO_MTF_RESET_TOUCH_TOL_ATR if demo_trial else RESET_TOUCH_TOL_ATR),
             break_atr=RESET_BREAK_TOL_ATR,
-            confirm_atr=(0.32 if demo_trial else CONTINUATION_CONFIRM_TOL_ATR),
+            confirm_atr=(DEMO_MTF_CONTINUATION_CONFIRM_TOL_ATR if demo_trial else CONTINUATION_CONFIRM_TOL_ATR),
             max_extension=TRIGGER_MAX_EMA20_EXTENSION_ATR)
     if len(c) < max(EMA_SLOW + 5, 80):
         return False, "NOT_ENOUGH_BARS", {}
@@ -770,7 +776,7 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> dict:
         if adx5 < M5_ADX_MIN:
             return {"signal": False, "reason": "ADX_5M_TOO_LOW", "coin": coin, "diag": {"adx5": round(adx5, 2)}}
 
-        demo_trial = market_context.get("_execution_mode") == "demo"
+        demo_trial = (market_context.get("_execution_mode") == "demo" and DEMO_STRATEGY_EXPERIMENTAL)
         bias1h, diag1h = _h1_bias(tf1h, demo_trial=demo_trial)
         bias15, diag15 = _m15_confirmation(tf15, bias1h, demo_trial=demo_trial)
         if bias1h == "none":

@@ -20,6 +20,7 @@ def load_scanner():
         "SCANNER_MIN_OPEN_INTEREST": 250_000.0,
         "SCANNER_MAX_SPREAD_BPS": 25.0, "SCANNER_MIN_TOP_BOOK_NOTIONAL": 2_000.0,
         "SCANNER_SHORTLIST_DEPTH_FOR_L2": 25, "SCANNER_L2_CACHE_TTL": 1.5,
+        "EXECUTION_BOOK_IMPACT_BPS": 25.0,
     }
     for key, value in values.items():
         setattr(config, key, value)
@@ -106,10 +107,11 @@ class ScannerFunnelTest(unittest.TestCase):
         self.assertEqual(scanner.get_scanner_funnel_snapshot()["shortlisted"], 3)
 
 
-    def test_demo_looser_book_filter_never_leaks_to_live_cache(self):
+    def test_optional_demo_book_override_never_leaks_to_live_cache(self):
         scanner = self.scanner
         markets = {"BTC-PERP": market(), "ETH-PERP": market()}
-        with patch.object(scanner, "_fetch_markets", return_value=markets), \
+        with patch.object(scanner, "_DEMO_TOP_BOOK_MIN_NOTIONAL", 250.0), \
+             patch.object(scanner, "_fetch_markets", return_value=markets), \
              patch.object(scanner, "_fetch_l2_quality", return_value=quality(book=750)):
             demo = scanner.get_ranked_symbols(execution_mode="demo")
             live = scanner.get_ranked_symbols()
@@ -122,13 +124,17 @@ class ScannerFunnelTest(unittest.TestCase):
         self.assertEqual(scanner._DEMO_LAST_GOOD_RESULTS, demo)
         self.assertEqual(scanner._LAST_GOOD_RESULTS, [])
 
-    def test_demo_medium_depth_is_eligible_without_loosening_live(self):
+    def test_demo_matches_live_scanner_floor_unless_explicitly_overridden(self):
         scanner = self.scanner
-        self.assertEqual(scanner._DEMO_TOP_BOOK_MIN_NOTIONAL, 250.0)
+        self.assertEqual(scanner._DEMO_TOP_BOOK_MIN_NOTIONAL,
+                         scanner.SCANNER_MIN_TOP_BOOK_NOTIONAL)
         markets = {'BTC-PERP': market()}
         with patch.object(scanner, '_fetch_markets', return_value=markets), \
              patch.object(scanner, '_fetch_l2_quality', return_value=quality(book=300)):
-            self.assertEqual(len(scanner._get_live_results(set(), execution_mode='demo')), 1)
+            self.assertEqual(scanner._get_live_results(set(), execution_mode='demo'), [])
+            self.assertEqual(scanner._get_live_results(set(), execution_mode='live'), [])
+            with patch.object(scanner, '_DEMO_TOP_BOOK_MIN_NOTIONAL', 250.0):
+                self.assertEqual(len(scanner._get_live_results(set(), execution_mode='demo')), 1)
             self.assertEqual(scanner._get_live_results(set(), execution_mode='live'), [])
         self.assertEqual(scanner._LAST_GOOD_RESULTS, [])
 

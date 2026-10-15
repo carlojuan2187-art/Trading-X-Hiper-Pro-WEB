@@ -62,33 +62,55 @@ def entry_gate_reason(account: dict, *, now: datetime | None = None) -> str | No
         return 'MIN_CAPITAL'
     return None
 
-def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict | None:
+def required_book_notional(account: dict) -> float:
+    """Order-book floor for this account's actual configured DEMO margin, not a fixed scanner guess."""
+    balance = _positive(account.get('balance_usdc'))
+    if not balance:
+        return math.inf
+    from app import trading_engine as engine
+    risk = validate_trade_conditions(balance, 1.0)
+    if not risk.get('ok'):
+        return math.inf
+    fee_multiplier = (DEMO_TAKER_FEE_BPS / 10000.0) * LEVERAGE
+    margin = _money(min(float(risk['position_size']), balance / (1 + fee_multiplier) - 0.00000002))
+    return 1.5 * margin * float(LEVERAGE) if margin > 0 else math.inf
+
+
+def open_position(account: dict, selected: dict, bid: float, ask: float,
+                  *, rejection: dict | None = None) -> dict | None:
     """Evalúa riesgo, drift y SL/TP ESTRUCTURAL con las funciones originales.
 
     None = sin entrada apta. Las funciones de exchange LIVE no se importan ni invocan.
     """
-    if entry_gate_reason(account) is not None:
+    def reject(reason: str, **details):
+        if rejection is not None:
+            rejection.update({'reason': reason, **details})
         return None
+
+    gate = entry_gate_reason(account)
+    if gate is not None:
+        return reject('ENTRY_GATE', gate=gate)
     direction = str(selected.get('direction') or '').lower()
     if direction not in {'long', 'short'}:
-        return None
+        return reject('INVALID_DIRECTION')
     if not valid_quote(bid, ask):
-        return None
+        return reject('INVALID_QUOTE', bid=bid, ask=ask)
     spread = (ask - bid) / ((ask + bid) / 2) * 10000
     if spread > float(EXECUTION_MAX_SPREAD_BPS):
-        return None
+        return reject('SPREAD_TOO_WIDE', spread_bps=round(spread, 3),
+                      allowed_bps=float(EXECUTION_MAX_SPREAD_BPS))
 
     from app import trading_engine as engine  # Motor de decisiones existente
     signal = selected.get('signal') or {}
     if not signal.get('signal') or float(selected.get('strength') or 0) < engine.MIN_TRADE_STRENGTH:
-        return None
+        return reject('INVALID_OR_WEAK_SIGNAL')
     balance = float(account['balance_usdc'])
     if balance < float(engine.MIN_CAPITAL_USDC):
-        return None
+        return reject('MIN_CAPITAL')
     # Validación de capital, posición y señal, sin cuotas ni pausas temporales DEMO.
     risk = validate_trade_conditions(balance, float(selected.get('strength') or 0))
     if not risk.get('ok'):
-        return None
+        return reject('RISK_REJECTED', risk_reason=str(risk.get('reason') or 'UNKNOWN'))
     desired_margin = min(float(risk['position_size']), balance)
     # Reserva explícita para comisión de entrada: sin ella 100% de margen
     # no deja dinero para pagar la comisión. Nunca superar el disponible.
@@ -96,7 +118,7 @@ def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict
     margin = _money(min(desired_margin, balance / (1 + fee_multiplier) - 0.00000002))
     notional = margin * float(LEVERAGE)
     if notional < float(engine.MIN_NOTIONAL_USDC):
-        return None
+        return reject('MIN_NOTIONAL', notional=round(notional, 2))
     # DEMO permite explorar más libros, pero no simula un fill cuyo notional
     # sobrepase la profundidad disponible observada en el scanner.
     # La referencia L2 puede envejecer: se conserva además el control de
@@ -106,13 +128,16 @@ def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict
         try:
             available_book = float(scanner_book)
         except (TypeError, ValueError, OverflowError):
-            return None
+            return reject('INVALID_SCANNER_BOOK')
         if not math.isfinite(available_book) or available_book < 1.5 * notional:
-            return None
+            return reject('SCANNER_BOOK_BELOW_ORDER', available_usdc=round(available_book, 2),
+                          required_usdc=round(1.5 * notional, 2), notional_usdc=round(notional, 2))
     entry = fill_price('buy' if direction == 'long' else 'sell', bid, ask)
-    drift_ok, _ = engine._entry_drift_check(signal=signal, current_price=entry, direction=direction)
+    drift_ok, drift_diag = engine._entry_drift_check(signal=signal, current_price=entry, direction=direction)
     if not drift_ok:
-        return None
+        return reject('PRICE_DRIFT', entry_price=entry,
+                      reference_price=signal.get('signal_reference_price'),
+                      drift=dict(drift_diag or {}))
     mgmt = engine._coalesce_management_params(
         signal=signal, entry_strength=float(selected.get('strength') or 0),
         best_score=float(signal.get('score') or 0),
@@ -123,14 +148,15 @@ def open_position(account: dict, selected: dict, bid: float, ask: float) -> dict
         fallback_tp_pct=float(mgmt.get('tp_activate_price') or 0),
     )
     if not plan_ok:
-        return None
+        return reject('EXIT_PLAN_REJECTED', plan=dict(plan or {}))
     qty = _quantity(notional / entry)
     if qty < float(engine.MIN_QTY_COIN) or qty * entry < float(engine.MIN_NOTIONAL_USDC):
-        return None
+        return reject('MIN_QUANTITY', quantity=qty, notional=round(qty * entry, 2))
     entry_fee = fee_usdc(qty * entry)
     if balance < margin + entry_fee:
         # No permitir saldo negativo por comisión al reservar el margen.
-        return None
+        return reject('INSUFFICIENT_BALANCE_FOR_FEE', balance=balance,
+                      total_reserved=round(margin + entry_fee, 6))
     updated = deepcopy(account)
     updated['balance_usdc'] = _money(balance - entry_fee)
     updated['position'] = {

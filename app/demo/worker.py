@@ -21,7 +21,7 @@ from app.demo import ledger
 from app.demo.settings import DEMO_ENABLED, DEMO_SCAN_SECONDS, DEMO_MAX_USERS_PER_SCAN
 from app.demo.credentials import user_ready
 from app.demo.market_events import decode_book
-from app.demo.simulator import open_position, update_position, entry_gate_reason
+from app.demo.simulator import open_position, update_position, entry_gate_reason, required_book_notional
 from app.hyperliquid_client import norm_coin
 
 
@@ -183,12 +183,14 @@ class DemoMarketRunner:
                 current = ledger.read(uid)
                 if not current or entry_gate_reason(current) is not None or not user_ready(uid):
                     continue
-                updated = open_position(current, selected, bid, ask)
+                reason: dict = {}
+                updated = open_position(current, selected, bid, ask, rejection=reason)
                 if updated:
                     ledger.save(current, updated)
                     opened += 1
                 else:
-                    logger.info('DEMO signal rejected at final execution user=%s symbol=%s', uid, coin)
+                    logger.info('DEMO final entry rejected user=%s symbol=%s diag=%s',
+                                uid, coin, json.dumps(reason, sort_keys=True, default=str))
             except ledger.Conflict:
                 logger.info('DEMO concurrent open avoided user=%s', uid)
             except Exception:
@@ -214,8 +216,19 @@ class DemoMarketRunner:
         for account in pool:
             uid = int(account['_id'])
             try:
-                # Una decisión independiente por usuario; scanner y router LIVE.
-                selected = engine._select_best_signal_from_scanner_shortlist(uid, set(), execution_mode='demo')
+                # The scanner's 250-USDC discovery floor is not an executable
+                # order-book guarantee for this user's configured margin.
+                # Exclude insufficient books BEFORE strategy ranking, otherwise
+                # the best signal can be selected and discarded at final entry.
+                min_book = required_book_notional(account)
+                ranked = engine.get_ranked_symbols(execution_mode='demo')
+                excluded = {str(row.get('symbol') or '').upper() for row in ranked
+                            if float(row.get('top_book_notional') or 0) < min_book}
+                if excluded:
+                    logger.info('DEMO book sizing user=%s required_usdc=%.2f excluded=%d candidates=%d',
+                                uid, min_book, len(excluded), len(ranked))
+                selected = engine._select_best_signal_from_scanner_shortlist(
+                    uid, excluded, execution_mode='demo')
                 if selected and selected.get('symbol'):
                     pending[uid] = (selected, time.monotonic())
             except Exception:

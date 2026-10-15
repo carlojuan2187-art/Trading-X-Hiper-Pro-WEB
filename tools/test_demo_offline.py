@@ -59,7 +59,7 @@ class FakeCollection:
         row = self.rows.get(query['_id'])
         return copy.deepcopy(row) if row and self._matches(row, query) else None
 
-    def find(self, query):
+    def find(self, query, projection=None):
         return [copy.deepcopy(v) for v in self.rows.values() if self._matches(v, query)]
 
     def replace_one(self, query, new):
@@ -111,6 +111,7 @@ engine._resolve_structural_exit_plan = lambda signal, entry_price, direction, fa
 sys.modules['app.trading_engine'] = engine
 market = types.ModuleType('app.hyperliquid_client')
 market.get_best_bid_ask = lambda symbol: (100.0, 100.1)
+market.make_request = lambda *args, **kwargs: []
 market.norm_coin = lambda symbol: str(symbol).strip().upper().removesuffix('-PERP').removesuffix('_PERP')
 sys.modules['app.hyperliquid_client'] = market
 pymongo = types.ModuleType('pymongo')

@@ -35,6 +35,13 @@ test('existing trading controls remain mapped to actual handlers', () => {
   assert.match(js, /activateTradingAction/);
 });
 
+test('control summary exposes simple status without losing technical details', () => {
+  assert.match(html, /class="advanced-section control-diagnostics"/);
+  assert.match(js, /readiness\.replaceChildren\(checks, details\)/);
+  assert.match(js, /diagnostics\.textContent = buildControlSummary\(control\)/);
+  assert.match(css, /\.control-checklist/);
+});
+
 test('dashboard hero is data-bound rather than mock trading performance', () => {
   for (const id of ['brandHeroEquity','brandHeroStatus','brandHeroPnl','brandHeroTrades']) {
     assert(html.includes('id="' + id + '"'));

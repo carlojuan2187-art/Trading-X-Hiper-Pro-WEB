@@ -50,5 +50,7 @@ jobs:
         run: |
           node --check app/web/static/app.js
           node --check app/web/static/trade-share/share-trade.js
+      - name: Share card unit and QR tests
+        run: node --test tests/test_trade_share_phase5.mjs
       - name: Share card and Admin DEMO reset regression
         run: node tests/test_share_demo_admin.cjs

@@ -216,3 +216,5 @@ body{font-size:15px;line-height:1.55;background:radial-gradient(circle at 95% -6
 @media(prefers-reduced-motion:reduce){
  *,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 }
+/* Los botones restringidos conservan la condición hidden también dentro del menú móvil. */
+.mobile-more-menu .tab.hidden{display:none!important}

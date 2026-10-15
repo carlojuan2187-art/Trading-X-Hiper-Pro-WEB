@@ -4401,12 +4401,46 @@ def _candidate_rank_tuple(signal: dict, scanner_row: dict) -> tuple:
     )
 
 
-def _select_best_signal_from_scanner_shortlist(user_id: int, exclude_symbols: set[str], *, execution_mode: str = "live") -> dict | None:
+def _demo_executable_shortlist(candidates: list[dict], minimum_book: float) -> list[dict]:
+    """Filter one immutable ranked L2 snapshot to this DEMO user's real order size."""
+    try:
+        required = float(minimum_book)
+    except (TypeError, ValueError, OverflowError):
+        return []
+    if not math.isfinite(required):
+        return []
+    if required <= 0:
+        return list(candidates)
+    eligible = []
+    for candidate in candidates:
+        try:
+            depth = float(candidate.get("top_book_notional") or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(depth) and depth >= required:
+            eligible.append(candidate)
+    return eligible
+
+
+def _select_best_signal_from_scanner_shortlist(
+    user_id: int, exclude_symbols: set[str], *, execution_mode: str = "live",
+    min_top_book_notional: float = 0.0,
+) -> dict | None:
     shortlist_started_ts = time.time()
     limit = _signal_candidate_limit()
     fetch_limit = max(int(limit * SHORTLIST_FETCH_MULTIPLIER), int(limit))
-    shortlist = get_ranked_symbols(exclude_symbols=exclude_symbols, limit=fetch_limit,
-                                    execution_mode=execution_mode)
+    enforce_demo_book = execution_mode == "demo" and min_top_book_notional > 0
+    shortlist = get_ranked_symbols(
+        exclude_symbols=exclude_symbols,
+        limit=None if enforce_demo_book else fetch_limit,
+        execution_mode=execution_mode,
+    )
+    if enforce_demo_book:
+        original_count = len(shortlist)
+        shortlist = _demo_executable_shortlist(shortlist, min_top_book_notional)
+        log(f"DEMO_EXECUTABLE_BOOK_SELECTION user={user_id} required_usdc={min_top_book_notional:.2f} "
+            f"candidates={original_count} executable={len(shortlist)} "
+            f"rejected={original_count - len(shortlist)}")
     shortlist_fetch_elapsed_s = time.time() - shortlist_started_ts
     if not shortlist:
         log("Scanner no devolvió candidatos", "WARN")

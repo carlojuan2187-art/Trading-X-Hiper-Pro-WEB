@@ -493,8 +493,9 @@ class DemoOfflineTests(unittest.TestCase):
         for uid in range(1, 9):
             ledger.change_status(uid, active=True)
         seen = []
-        def selector(uid, excluded, *, execution_mode):
+        def selector(uid, excluded, *, execution_mode, min_top_book_notional=0):
             self.assertEqual(execution_mode, 'demo')
+            self.assertGreater(min_top_book_notional, 0)
             seen.append(uid)
             return None
         with patch.object(engine, '_select_best_signal_from_scanner_shortlist', side_effect=selector, create=True):
@@ -595,7 +596,7 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertIsNotNone(simulator.open_position(closed, signal(), 100, 100.1))
 
 
-    def test_demo_preentry_liquidity_filters_nonexecutable_books(self):
+    def test_demo_passes_account_liquidity_requirement_into_selector(self):
         from app.demo.simulator import required_book_notional
         acc = ledger.change_status(7, active=True)
         required = required_book_notional(acc)
@@ -605,16 +606,15 @@ class DemoOfflineTests(unittest.TestCase):
         picked['symbol'] = 'LIQUID-PERP'
         picked['scanner'] = {'top_book_notional': 3000}
         captured = []
-        def selector(uid, excluded, *, execution_mode):
-            captured.append((uid, set(excluded), execution_mode))
+        def selector(uid, excluded, *, execution_mode, min_top_book_notional=0):
+            captured.append((uid, set(excluded), execution_mode, min_top_book_notional))
             return picked
-        with patch.object(engine, 'get_ranked_symbols', return_value=[
-                {'symbol': 'THIN-PERP', 'top_book_notional': 350},
-                {'symbol': 'LIQUID-PERP', 'top_book_notional': 3000},
-        ]), patch.object(engine, '_select_best_signal_from_scanner_shortlist', side_effect=selector):
+        with patch.object(engine, '_select_best_signal_from_scanner_shortlist', side_effect=selector):
             runner = worker.DemoMarketRunner()
             pending, offset = runner.collect_signals()
-        self.assertEqual(captured, [(7, {'THIN-PERP'}, 'demo')])
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][:3], (7, set(), 'demo'))
+        self.assertAlmostEqual(captured[0][3], required)
         self.assertIn(7, pending)
         self.assertEqual(pending[7][0]['symbol'], 'LIQUID-PERP')
 

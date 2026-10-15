@@ -29,6 +29,23 @@ def functions(path, names, namespace):
     return namespace
 
 
+class DemoExecutableBookTests(unittest.TestCase):
+    def test_filters_same_ranked_snapshot_using_real_order_size(self):
+        import math
+        ns = functions('app/trading_engine.py', {'_demo_executable_shortlist'}, {'math': math})
+        entries = [
+            {'symbol': 'THIN-PERP', 'top_book_notional': 522.97},
+            {'symbol': 'LIQUID-PERP', 'top_book_notional': 2000.0},
+            {'symbol': 'INVALID-PERP', 'top_book_notional': float('nan')},
+            {'symbol': 'BORDER-PERP', 'top_book_notional': 1492.54},
+            {'symbol': 'MISSING-PERP'},
+        ]
+        eligible = ns['_demo_executable_shortlist'](entries, 1492.54)
+        self.assertEqual([x['symbol'] for x in eligible], ['LIQUID-PERP', 'BORDER-PERP'])
+        self.assertEqual(len(ns['_demo_executable_shortlist'](entries, 0)), len(entries))
+        self.assertEqual(ns['_demo_executable_shortlist'](entries, math.inf), [])
+
+
 class CoverageTests(unittest.TestCase):
     def test_no_fill_rounds_cover_all_symbols(self):
         tracker = Coverage()

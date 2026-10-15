@@ -4422,9 +4422,25 @@ def _demo_executable_shortlist(candidates: list[dict], minimum_book: float) -> l
     return eligible
 
 
+def _rank_demo_signal_choices(choices: list[dict], limit: int) -> list[dict]:
+    """Stable best-first order; never retry the same exchange symbol within a scan."""
+    ranked = sorted(choices, key=lambda item: item["rank_tuple"], reverse=True)
+    seen: set[str] = set()
+    result: list[dict] = []
+    for candidate in ranked:
+        coin = str(candidate.get("symbol_for_exec") or candidate.get("symbol") or "").upper()
+        if not coin or coin in seen:
+            continue
+        seen.add(coin)
+        result.append(candidate)
+        if len(result) >= max(1, min(int(limit), 3)):
+            break
+    return result
+
+
 def _select_best_signal_from_scanner_shortlist(
     user_id: int, exclude_symbols: set[str], *, execution_mode: str = "live",
-    min_top_book_notional: float = 0.0,
+    min_top_book_notional: float = 0.0, demo_fallback_limit: int = 1,
 ) -> dict | None:
     shortlist_started_ts = time.time()
     limit = _signal_candidate_limit()
@@ -4460,6 +4476,7 @@ def _select_best_signal_from_scanner_shortlist(
     )
 
     best_choice: dict | None = None
+    demo_viable_choices: list[dict] = []
     best_shadow_choice: dict | None = None
     blocked_samples: list[str] = []
     rejection_counts = Counter()
@@ -4651,6 +4668,8 @@ def _select_best_signal_from_scanner_shortlist(
             "shortlist_size": len(shortlist),
         }
 
+        if execution_mode == "demo" and demo_fallback_limit > 1:
+            demo_viable_choices.append(picked)
         if (best_choice is None) or (picked["rank_tuple"] > best_choice["rank_tuple"]):
             best_choice = picked
 
@@ -4755,6 +4774,14 @@ def _select_best_signal_from_scanner_shortlist(
         f"scanner_score={float(scanner_meta.get('score', 0.0) or 0.0):.4f}{shadow_suffix}",
         "INFO",
     )
+    if execution_mode == "demo" and demo_fallback_limit > 1:
+        ordered = _rank_demo_signal_choices(demo_viable_choices, demo_fallback_limit)
+        # Store alternatives in memory only; each will be revalidated with a
+        # fresh WS book before opening. LIVE still returns a single best signal.
+        best_choice["_demo_alternatives"] = [dict(choice) for choice in ordered[1:]]
+        log(f"DEMO_ALTERNATIVES user={user_id} chosen={best_choice['symbol']} "
+            f"alternatives={[c['symbol'] for c in ordered[1:]]} "
+            f"valid={len(demo_viable_choices)}", "INFO")
     return best_choice
 
 

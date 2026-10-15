@@ -450,6 +450,77 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertEqual(runner.open_if_pending('SOL', 100, 100.1), 1)
         self.assertEqual(simulator.entry_gate_reason(ledger.read(7)), 'NOT_ELIGIBLE')
 
+    def test_fallback_opens_second_symbol_only_after_first_fails_and_new_book_arrives(self):
+        import asyncio
+        import json
+        ledger.change_status(7, active=True)
+        runner = worker.DemoMarketRunner()
+        first = signal()
+        first['symbol'] = 'XRP-PERP'
+        second = signal('short')
+        second['symbol'] = 'BTC-PERP'
+        first['_demo_alternatives'] = [second]
+        first['scanner'] = {'top_book_notional': 3000}
+        second['scanner'] = {'top_book_notional': 3000}
+        now = worker.time.monotonic()
+        runner.pending_by_user = {7: (first, now)}
+
+        class Socket:
+            def __init__(self):
+                self.messages = []
+            async def send(self, payload):
+                self.messages.append(json.loads(payload))
+        ws = Socket()
+        asyncio.run(runner.subscribe_new(ws))
+        self.assertEqual(runner.subscribed, {'XRP'})
+        # A valid signal cannot pass a failed post-entry structural RR check.
+        real_plan = engine._resolve_structural_exit_plan
+        def plan_for_symbol(*, signal, entry_price, direction, **kwargs):
+            if direction == 'long':
+                return False, {'reason': 'RR_TOO_LOW_AFTER_ENTRY', 'rr': 0.929}
+            return real_plan(signal=signal, entry_price=entry_price, direction=direction, **kwargs)
+        with patch.object(engine, '_resolve_structural_exit_plan', side_effect=plan_for_symbol):
+            self.assertEqual(runner.open_if_pending('XRP', 100, 100.1), 0)
+        self.assertEqual(runner.pending_by_user[7][0]['symbol'], 'BTC-PERP')
+        self.assertEqual(runner.pending_by_user[7][1], now)
+        self.assertIsNone(ledger.read(7)['position'])
+        asyncio.run(runner.subscribe_new(ws))
+        self.assertEqual(runner.subscribed, {'BTC'})
+        self.assertEqual(ws.messages[-2]['method'], 'subscribe')
+        self.assertEqual(runner.open_if_pending('XRP', 100, 100.1), 0)
+        self.assertEqual(runner.open_if_pending('BTC', 100, 100.1), 1)
+        self.assertEqual(ledger.read(7)['position']['symbol'], 'BTC-PERP')
+        self.assertEqual(runner.pending_by_user, {})
+
+    def test_fallback_never_bypasses_account_gate_or_stale_signal(self):
+        ledger.change_status(7, active=True)
+        runner = worker.DemoMarketRunner()
+        first = signal()
+        next_choice = signal('short')
+        next_choice['symbol'] = 'BTC-PERP'
+        first['_demo_alternatives'] = [next_choice]
+        runner.pending_by_user = {7: (first, worker.time.monotonic() - 31)}
+        self.assertEqual(runner.open_if_pending('SOL', 100, 100.1), 0)
+        self.assertEqual(runner.pending_by_user, {})
+        runner.pending_by_user = {7: (first, worker.time.monotonic())}
+        ledger.change_status(7, active=False)
+        self.assertEqual(runner.open_if_pending('SOL', 100, 100.1), 0)
+        self.assertEqual(runner.pending_by_user, {})
+        self.assertIsNone(ledger.read(7)['position'])
+
+    def test_fallback_never_bypasses_global_risk_rejection(self):
+        ledger.change_status(7, active=True)
+        runner = worker.DemoMarketRunner()
+        first = signal()
+        second = signal('short')
+        second['symbol'] = 'BTC-PERP'
+        first['_demo_alternatives'] = [second]
+        runner.pending_by_user = {7: (first, worker.time.monotonic())}
+        with patch.object(simulator, 'validate_trade_conditions',
+                          return_value={'ok': False, 'reason': 'INVALID_CAPITAL_INPUT'}):
+            self.assertEqual(runner.open_if_pending('SOL', 100, 100.1), 0)
+        self.assertEqual(runner.pending_by_user, {})
+
     def test_demo_no_fixed_cooldown_or_daily_hourly_trade_limits(self):
         from datetime import datetime, timezone, timedelta
         acc = ledger.change_status(7, active=True)
@@ -493,9 +564,10 @@ class DemoOfflineTests(unittest.TestCase):
         for uid in range(1, 9):
             ledger.change_status(uid, active=True)
         seen = []
-        def selector(uid, excluded, *, execution_mode, min_top_book_notional=0):
+        def selector(uid, excluded, *, execution_mode, min_top_book_notional=0, demo_fallback_limit=1):
             self.assertEqual(execution_mode, 'demo')
             self.assertGreater(min_top_book_notional, 0)
+            self.assertEqual(demo_fallback_limit, 3)
             seen.append(uid)
             return None
         with patch.object(engine, '_select_best_signal_from_scanner_shortlist', side_effect=selector, create=True):
@@ -606,7 +678,8 @@ class DemoOfflineTests(unittest.TestCase):
         picked['symbol'] = 'LIQUID-PERP'
         picked['scanner'] = {'top_book_notional': 3000}
         captured = []
-        def selector(uid, excluded, *, execution_mode, min_top_book_notional=0):
+        def selector(uid, excluded, *, execution_mode, min_top_book_notional=0, demo_fallback_limit=1):
+            self.assertEqual(demo_fallback_limit, 3)
             captured.append((uid, set(excluded), execution_mode, min_top_book_notional))
             return picked
         with patch.object(engine, '_select_best_signal_from_scanner_shortlist', side_effect=selector):

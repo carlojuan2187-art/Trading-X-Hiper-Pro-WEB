@@ -26,12 +26,16 @@ class MarketError(ValueError):
 
 
 def canonical_coin(raw: str) -> str:
-    """Convierte BTC-USDC / BTC-USDT a BTC; conserva símbolos HIP-3 nativos."""
+    """Convierte BTC-USDC / BTC-USDT / BTC-PERP a BTC; conserva HIP-3 nativos."""
     if not isinstance(raw, str):
         raise MarketError('Símbolo inválido')
     value = raw.strip().upper().replace('/', '-').replace('_USDC', '-USDC').replace('_USDT', '-USDT')
     if value.endswith(('-USDC', '-USDT')):
         value = value.rsplit('-', 1)[0]
+    # Legacy trade history (especially paper) stores FET-PERP while the
+    # public Hyperliquid API only accepts its native "FET" identifier.
+    if value.endswith('-PERP'):
+        value = value[:-5]
     if not _SYMBOL_RE.fullmatch(value):
         raise MarketError('Símbolo inválido')
     return value

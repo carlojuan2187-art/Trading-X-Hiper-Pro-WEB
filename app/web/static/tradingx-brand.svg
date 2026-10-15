@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
+<title id="title">Trading X Hiper Pro</title><desc id="desc">Símbolo X metálico con acentos turquesa sobre grafito</desc>
+<defs>
+  <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#f4fcff"/><stop offset=".27" stop-color="#91ccdb"/><stop offset=".50" stop-color="#f5fdff"/><stop offset=".76" stop-color="#2dcbd0"/><stop offset="1" stop-color="#0a708e"/>
+  </linearGradient>
+  <linearGradient id="teal" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#46fff0"/><stop offset=".55" stop-color="#12bfd2"/><stop offset="1" stop-color="#086387"/>
+  </linearGradient>
+  <linearGradient id="line" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#153949"/><stop offset=".5" stop-color="#42efe5"/><stop offset="1" stop-color="#204356"/>
+  </linearGradient>
+</defs>
+<rect x="2" y="2" width="92" height="92" rx="22" fill="#071422"/>
+<rect x="3" y="3" width="90" height="90" rx="21" fill="none" stroke="url(#line)" stroke-width="1.5"/>
+<path d="M18 20h21l10 16 10-16h20L61 48l19 28H58L48 59 37 76H17l20-29z" fill="url(#metal)" stroke="#91dff0" stroke-width="1" stroke-linejoin="round"/>
+<path d="M26 25h10l13 19 13-19h9L56 48l15 23h-9L48 52 34 71h-9l17-24z" fill="#082032" opacity=".91"/>
+<path d="M27 20h11L49 36l-5 7z" fill="url(#teal)"/>
+<path d="M58 53l19 23H64L51 60z" fill="url(#teal)"/>
+<path d="M17 80h63" stroke="#4bebdf" stroke-width="2" stroke-linecap="round" opacity=".75"/>
+<path d="M26 13h43" stroke="#f0c873" stroke-width="1.7" stroke-linecap="round" opacity=".85"/>
+</svg>

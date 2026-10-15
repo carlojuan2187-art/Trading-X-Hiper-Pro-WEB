@@ -836,8 +836,33 @@ function buildControlSummary(control) {
   ].filter(Boolean).join('\n');
 }
 
+// Pantalla principal: las métricas son lecturas reales y se distinguen de DEMO.
+function renderBrandHero() {
+  const dashboard = state.dashboard || {};
+  const market = dashboard.exchange_snapshot || {};
+  const perf = state.performance || {};
+  const window30 = perf['30d'] || {};
+  const equity = document.getElementById('brandHeroEquity');
+  const status = document.getElementById('brandHeroStatus');
+  const pnl = document.getElementById('brandHeroPnl');
+  const trades = document.getElementById('brandHeroTrades');
+  if (!equity) return;
+  const rawEquity = market.account_value;
+  const readableEquity = rawEquity !== null && rawEquity !== undefined && Number.isFinite(Number(rawEquity));
+  equity.textContent = readableEquity ? `${formatNumber(rawEquity, 2)} USDC` : 'Sin lectura';
+  status.textContent = dashboard.operational_label || market.label || 'Estado del motor no disponible';
+  const rawPnl = window30.pnl_total;
+  const validPnl = rawPnl !== null && rawPnl !== undefined && Number.isFinite(Number(rawPnl));
+  pnl.textContent = validPnl ? `${Number(rawPnl) > 0 ? '+' : ''}${formatNumber(rawPnl, 2)} USDC` : 'Sin datos';
+  pnl.classList.toggle('positive', validPnl && Number(rawPnl) > 0);
+  pnl.classList.toggle('negative', validPnl && Number(rawPnl) < 0);
+  const count = window30.trades_count ?? window30.total_trades ?? window30.trades ?? perf.executive?.trades_30d;
+  trades.textContent = typeof count === 'number' && Number.isFinite(count) ? String(count) : '—';
+}
+
 function renderDashboard(data) {
   state.dashboard = data;
+  renderBrandHero();
   const usernameText = data.username ? `@${data.username}` : `ID ${data.user_id || '—'}`;
   const readinessText = data.status_summary || 'not_ready';
   const tradingText = resolveRequestedTradingStatus(data);
@@ -914,7 +939,39 @@ function renderDashboard(data) {
 
 function renderControl(control) {
   state.control = control;
-  elements.controlReadinessBox.textContent = buildControlSummary(control);
+  const readiness = elements.controlReadinessBox;
+  const checks = document.createElement('div');
+  checks.className = 'control-checklist';
+  const checkRows = [
+    ['Wallet Hyperliquid', control.wallet_configured === true, 'Configurada', 'Pendiente'],
+    ['Clave privada', control.private_key_configured === true, 'Cifrada y registrada', 'No configurada'],
+    ['Políticas', control.terms_accepted === true, 'Aceptadas', 'Por confirmar'],
+    ['Plan', control.plan_active === true, 'Vigente', 'Sin plan activo'],
+  ];
+  for (const [label, okay, positive, negative] of checkRows) {
+    const row = document.createElement('div');
+    row.className = 'control-checkitem';
+    const marker = document.createElement('span');
+    marker.className = okay ? 'check-ok' : 'check-pending';
+    marker.textContent = okay ? '✓' : '!';
+    marker.setAttribute('aria-hidden', 'true');
+    const copy = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = label;
+    const subtitle = document.createElement('span');
+    subtitle.textContent = okay ? positive : negative;
+    copy.append(title, subtitle);
+    row.append(marker, copy);
+    checks.append(row);
+  }
+  const details = document.createElement('details');
+  details.className = 'readiness-technical-details';
+  const summary = document.createElement('summary');
+  summary.textContent = 'Detalles técnicos y bloqueadores';
+  const diagnostics = document.createElement('pre');
+  diagnostics.textContent = buildControlSummary(control);
+  details.append(summary, diagnostics);
+  readiness.replaceChildren(checks, details);
   elements.termsStatusText.textContent = control.terms_accepted ? 'Confirmadas' : 'Pendientes de confirmación';
   elements.acceptTermsButton.disabled = control.terms_accepted;
   elements.activateTradingButton.disabled = !control.activation_ready || isTradingEffectivelyActive(control);
@@ -1006,6 +1063,7 @@ function renderPerformanceWindowChart(performance = {}) {
 
 function renderPerformance(performance) {
   state.performance = performance;
+  renderBrandHero();
   renderPerformanceWindowChart(performance);
   elements.performanceGrid.innerHTML = '';
   elements.performanceGrid.append(
@@ -2089,6 +2147,25 @@ async function loadData(options = {}) {
 function bindTabs() {
   const buttons = Array.from(document.querySelectorAll('.tab'));
   const panels = Array.from(document.querySelectorAll('.panel'));
+  const moreButton = document.getElementById('mobileMoreButton');
+  const moreMenu = document.getElementById('mobileMoreMenu');
+  function closeMoreMenu() {
+    if (!moreMenu || !moreButton) return;
+    moreMenu.hidden = true;
+    moreButton.setAttribute('aria-expanded', 'false');
+  }
+  moreButton?.addEventListener('click', () => {
+    if (!moreMenu) return;
+    const willOpen = moreMenu.hidden;
+    moreMenu.hidden = !willOpen;
+    moreButton.setAttribute('aria-expanded', String(willOpen));
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeMoreMenu();
+  });
+  document.addEventListener('click', (event) => {
+    if (!moreMenu?.hidden && !moreMenu.contains(event.target) && !moreButton?.contains(event.target)) closeMoreMenu();
+  });
   const titleMap = {
     overview: 'Dashboard',
     system: 'Sistema',
@@ -2103,6 +2180,8 @@ function bindTabs() {
     button.addEventListener('click', () => {
       const target = button.dataset.tab;
       if ((target === 'admin' || target === 'system') && !state.isAdmin) return;
+      closeMoreMenu();
+      moreButton?.classList.toggle('is-active', ['billing', 'system', 'admin'].includes(target));
       buttons.forEach((item) => item.classList.toggle('is-active', item.dataset.tab === target));
       panels.forEach((panel) => panel.classList.toggle('is-active', panel.dataset.panel === target));
       if (workspaceTitle) workspaceTitle.textContent = titleMap[target] || 'Workspace';

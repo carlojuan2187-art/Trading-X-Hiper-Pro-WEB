@@ -13,6 +13,7 @@ on:
       - 'app/strategies/breakout_reset.py'
       - 'app/web/static/market/market-terminal.js'
       - 'app/market/terminal.py'
+      - 'app/web/static/brand-premium.css'
       - 'app/web/static/index.html'
       - 'app/web/static/app.js'
       - 'app/web/static/trade-share/**'
@@ -52,5 +53,7 @@ jobs:
           node --check app/web/static/trade-share/share-trade.js
       - name: Share card unit and QR tests
         run: node --test tests/test_trade_share_phase5.mjs
+      - name: Premium UI regressions
+        run: node --test tests/test_premium_ui.cjs
       - name: Share card and Admin DEMO reset regression
         run: node tests/test_share_demo_admin.cjs

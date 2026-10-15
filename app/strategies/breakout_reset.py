@@ -829,7 +829,11 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> dict:
         if (bias1h == "none" and market_context.get("_execution_mode") == "demo"
                 and DEMO_H1_EARLY_REVERSAL_ENABLED):
             bias1h, diag1h = _demo_h1_early_reversal(tf1h, diag1h)
-        bias15, diag15 = _m15_confirmation(\n            tf15, bias1h,\n            demo_trial=(demo_trial or (market_context.get("_execution_mode") == "demo"\n                                      and DEMO_M15_EARLY_CONFIRMATION_ENABLED)),\n        )
+        bias15, diag15 = _m15_confirmation(
+            tf15, bias1h,
+            demo_trial=(demo_trial or (market_context.get("_execution_mode") == "demo"
+                                      and DEMO_M15_EARLY_CONFIRMATION_ENABLED)),
+        )
         if bias1h == "none":
             return {"signal": False, "reason": "NO_H1_BIAS", "coin": coin, "diag": diag1h}
         if bias15 == "none":

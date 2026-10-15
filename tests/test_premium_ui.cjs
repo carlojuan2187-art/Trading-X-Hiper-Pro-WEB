@@ -12,6 +12,8 @@ test('premium design loads after terminal styling', () => {
   const premium = html.indexOf('/static/brand-premium.css?');
   assert(baseline >= 0 && baseline < market && market < premium);
   assert.match(css, /@media\s*\(max-width:860px\)/);
+  assert.match(html, /\/static\/tradingx-brand\.svg/);
+  assert(!html.includes('/static/miniapp-logo.png'));
 });
 
 test('mobile menu keeps existing sections and admin visibility', () => {

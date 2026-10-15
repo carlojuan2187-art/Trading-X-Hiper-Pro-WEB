@@ -29,6 +29,19 @@ def functions(path, names, namespace):
     return namespace
 
 
+class DemoAlternativeRankingTests(unittest.TestCase):
+    def test_best_first_deduplicates_and_limits_to_three(self):
+        ns = functions('app/trading_engine.py', {'_rank_demo_signal_choices'}, {})
+        ranked = ns['_rank_demo_signal_choices']([
+            {'symbol': 'BTC-PERP', 'symbol_for_exec': 'BTC', 'rank_tuple': (96.24, 0.96)},
+            {'symbol': 'XRP-PERP', 'symbol_for_exec': 'XRP', 'rank_tuple': (96.33, 0.96)},
+            {'symbol': 'BTC', 'symbol_for_exec': 'BTC', 'rank_tuple': (90, 0.9)},
+            {'symbol': 'SOL-PERP', 'symbol_for_exec': 'SOL', 'rank_tuple': (85, 0.8)},
+            {'symbol': 'ETH-PERP', 'symbol_for_exec': 'ETH', 'rank_tuple': (84, 0.7)},
+        ], 3)
+        self.assertEqual([x['symbol'] for x in ranked], ['XRP-PERP', 'BTC-PERP', 'SOL-PERP'])
+
+
 class DemoExecutableBookTests(unittest.TestCase):
     def test_filters_same_ranked_snapshot_using_real_order_size(self):
         import math

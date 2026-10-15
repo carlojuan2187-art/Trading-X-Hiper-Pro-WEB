@@ -191,6 +191,25 @@ class DemoMarketRunner:
                 else:
                     logger.info('DEMO final entry rejected user=%s symbol=%s diag=%s',
                                 uid, coin, json.dumps(reason, sort_keys=True, default=str))
+                    # Only a rejected trade-specific execution check can fall
+                    # back. Global account/risk gates are never circumvented.
+                    fallback_causes = {
+                        'SPREAD_TOO_WIDE', 'INVALID_QUOTE', 'SCANNER_BOOK_BELOW_ORDER',
+                        'INVALID_SCANNER_BOOK', 'PRICE_DRIFT', 'EXIT_PLAN_REJECTED',
+                        'MIN_QUANTITY',
+                    }
+                    alternatives = list(selected.get('_demo_alternatives') or [])
+                    if reason.get('reason') in fallback_causes and alternatives and now - issued_at <= 30:
+                        next_choice = dict(alternatives[0])
+                        next_choice['_demo_alternatives'] = alternatives[1:]
+                        self.pending_by_user[uid] = (next_choice, issued_at)
+                        logger.info('DEMO_FALLBACK_ARMED user=%s from=%s to=%s '
+                                    'cause=%s remaining=%d',
+                                    uid, coin, _ws_coin(next_choice['symbol']),
+                                    reason.get('reason'), len(alternatives) - 1)
+                    elif alternatives:
+                        logger.info('DEMO_FALLBACK_STOPPED user=%s reason=%s',
+                                    uid, reason.get('reason'))
             except ledger.Conflict:
                 logger.info('DEMO concurrent open avoided user=%s', uid)
             except Exception:
@@ -224,7 +243,8 @@ class DemoMarketRunner:
                 # Pass the requirement INTO the selector. A separate preliminary
                 # scanner call can refresh before ranking and admit a thin book.
                 selected = engine._select_best_signal_from_scanner_shortlist(
-                    uid, set(), execution_mode='demo', min_top_book_notional=min_book)
+                    uid, set(), execution_mode='demo', min_top_book_notional=min_book,
+                    demo_fallback_limit=3)
                 if selected and selected.get('symbol'):
                     pending[uid] = (selected, time.monotonic())
             except Exception:
@@ -315,8 +335,18 @@ class DemoMarketRunner:
                 if symbol not in self.subscribed:
                     continue
                 _, closed = await asyncio.to_thread(self.protected_positions, symbol, bid, ask)
+                # A veto can arm a different coin without opening a position;
+                # immediately update WS subscriptions instead of waiting 5m.
+                pending_before = {
+                    uid: _ws_coin(str(choice.get('symbol') or ''))
+                    for uid, (choice, _) in self.pending_by_user.items()
+                }
                 opened = await asyncio.to_thread(self.open_if_pending, symbol, bid, ask)
-                if closed or opened:
+                pending_after = {
+                    uid: _ws_coin(str(choice.get('symbol') or ''))
+                    for uid, (choice, _) in self.pending_by_user.items()
+                }
+                if closed or opened or pending_before != pending_after:
                     logger.info('DEMO WS symbol=%s opened=%s closed=%s', symbol, opened, closed)
                     await self.subscribe_new(ws)
 

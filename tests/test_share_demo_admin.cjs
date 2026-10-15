@@ -1,0 +1,23 @@
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+
+const artwork='app/web/static/tradingx-share-background.avif';
+const share=fs.readFileSync('app/web/static/trade-share/share-trade.js','utf8');
+const main=fs.readFileSync('app/web/static/app.js','utf8');
+const page=fs.readFileSync('app/web/static/index.html','utf8');
+const admin=fs.readFileSync('app/api/routes_admin.py','utf8');
+assert(fs.existsSync(artwork) && fs.statSync(artwork).size > 4000, 'Missing user supplied golden-X background');
+const bytes=fs.readFileSync(artwork);
+assert.equal(bytes.subarray(4,12).toString('ascii'),'ftypavif','Expected real AVIF asset, not placeholder');
+assert.match(share,/tradingx-share-background\.avif/);
+assert.match(share,/ctx\.drawImage\(artwork,/);
+assert.doesNotMatch(share,/function cell\(/);
+assert.doesNotMatch(share,/cell\(ctx,/);
+assert.match(share,/drawText\(ctx, val,/);
+assert.match(main,/resetAllDemoStatsForAdmin/);
+assert.doesNotMatch(main,/await loadAdmin\(/, 'non-existent loadAdmin helper');
+assert.match(main,/phrase !== 'REINICIAR DEMO'/);
+assert.match(page,/id="adminResetDemoButton"/);
+assert.match(admin,/Depends\(require_admin_session\)/);
+assert.match(admin,/Literal\['REINICIAR DEMO'\]/);
+console.log('Golden-X trade-share artwork and admin DEMO reset contract passed');

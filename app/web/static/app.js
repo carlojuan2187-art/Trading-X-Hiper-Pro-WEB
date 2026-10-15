@@ -118,6 +118,8 @@ const elements = {
   adminOperatorSnapshots: $('adminOperatorSnapshots'),
   adminClearMonitorButton: $('adminClearMonitorButton'),
   adminClearMonitorStatus: $('adminClearMonitorStatus'),
+  adminResetDemoButton: $('adminResetDemoButton'),
+  adminResetDemoStatus: $('adminResetDemoStatus'),
   adminLivePositions: $('adminLivePositions'),
   adminSearchForm: $('adminSearchForm'),
   adminSearchInput: $('adminSearchInput'),
@@ -1537,6 +1539,33 @@ function renderAdmin(data) {
   }
 }
 
+async function resetAllDemoStatsForAdmin() {
+  if (!state.isAdmin || !elements.adminResetDemoButton) return;
+  const phrase = window.prompt(
+    'ATENCIÓN: borrarás el historial, estadísticas y PnL DEMO de todas las cuentas. ' +
+    'Cada saldo volverá a su capital inicial y el bot quedará pausado. LIVE NO SE MODIFICA.\n\n' +
+    'Escribe REINICIAR DEMO para continuar:'
+  );
+  if (phrase !== 'REINICIAR DEMO') return;
+  if (!window.confirm('Última confirmación: ¿reiniciar TODAS las cuentas DEMO? La acción es irreversible.')) return;
+  elements.adminResetDemoButton.disabled = true;
+  elements.adminResetDemoStatus.textContent = 'Verificando posiciones y reiniciando DEMO…';
+  try {
+    const result = await apiFetch('/api/v1/admin/demo/reset-all', {
+      method: 'POST', body: JSON.stringify({ confirmation: phrase }),
+    });
+    elements.adminResetDemoStatus.textContent =
+      `Reinicio DEMO completado: ${result.reset_accounts} cuenta(s). Entradas pausadas; reactívalas manualmente.`;
+    await loadDemo();
+    renderAdmin(await apiFetch('/api/v1/admin/overview'));
+  } catch (error) {
+    elements.adminResetDemoStatus.textContent =
+      error.message || 'No se pudo reiniciar DEMO. Verifica el estado de las posiciones.';
+  } finally {
+    elements.adminResetDemoButton.disabled = false;
+  }
+}
+
 function formatDateTimeOrDash(value) {
   return value ? formatDate(value) : '—';
 }
@@ -2860,6 +2889,7 @@ function bindActions() {
   if (elements.adminClearMonitorButton) {
     elements.adminClearMonitorButton.addEventListener('click', clearAdminMonitorFeed);
   }
+  elements.adminResetDemoButton?.addEventListener('click', resetAllDemoStatsForAdmin);
 }
 
 async function bootstrap() {

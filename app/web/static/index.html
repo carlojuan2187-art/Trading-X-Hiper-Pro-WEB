@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=phase5-share" />
+    <link rel="stylesheet" href="/static/styles.css?v=share-artwork-and-demo-reset-20261015" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="/static/phone-countries.js?v=phone-auth-v1"></script>
   </head>
@@ -558,6 +558,20 @@
             <article class="glass-card panel-card panel-span-2">
               <div class="panel-head">
                 <div>
+                  <span class="section-tag">ADMIN · LABORATORIO DEMO</span>
+                  <h3>Reiniciar estadísticas DEMO</h3>
+                </div>
+              </div>
+              <p class="admin-subcopy">Borra el historial, las estadísticas y el PnL de TODAS las cuentas simuladas. Restablece el capital inicial de cada una y pausa las entradas. Requiere que no haya posiciones DEMO abiertas. No afecta LIVE.</p>
+              <div class="admin-inline-actions">
+                <button id="adminResetDemoButton" class="secondary-button admin-danger-action" type="button">Borrar estadísticas DEMO</button>
+                <p id="adminResetDemoStatus" class="admin-subcopy" role="status">Acción irreversible · confirmación escrita obligatoria.</p>
+              </div>
+            </article>
+
+            <article class="glass-card panel-card panel-span-2">
+              <div class="panel-head">
+                <div>
                   <span class="section-tag">ADMIN · HISTORIAL</span>
                   <h3>Acciones recientes</h3>
                 </div>
@@ -700,8 +714,8 @@
     </div>
 
     <link rel="stylesheet" href="/static/market/market-terminal.css?v=terminal-pro-v2-20261014" />
-    <script src="/static/app.js?v=terminal-pro-v2-20261014"></script>
+    <script src="/static/app.js?v=admin-demo-reset-20261015"></script>
     <script type="module" src="/static/market/market-terminal.js?v=fix-perp-history-chart-20261015"></script>
-    <script type="module" src="/static/trade-share/share-trade.js"></script>
+    <script type="module" src="/static/trade-share/share-trade.js?v=share-artwork-20261015"></script>
   </body>
 </html>

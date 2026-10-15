@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+import logging
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import require_admin_session
 from app.services import admin_service
+from app.demo import ledger as demo_ledger
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/api/v1/admin', tags=['admin'])
 
 
 class AdminActionPayload(BaseModel):
     reason: str | None = Field(default=None, max_length=300)
+
+
+class DemoGlobalResetPayload(BaseModel):
+    confirmation: Literal['REINICIAR DEMO']
 
 
 class ManualPlanDaysPayload(AdminActionPayload):
@@ -26,6 +36,20 @@ def _require_admin_attr(name: str):
             detail=f'Admin service no disponible: {name}',
         )
     return attr
+
+
+@router.post('/demo/reset-all')
+def admin_reset_all_demo_stats(
+    payload: DemoGlobalResetPayload,
+    session: dict = Depends(require_admin_session),
+) -> dict:
+    try:
+        result = demo_ledger.reset_all_demo_accounts()
+    except (ValueError, demo_ledger.Conflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    logger.warning('ADMIN_DEMO_RESET actor=%s accounts=%s live_untouched=true',
+                   session['user_id'], result['reset_accounts'])
+    return result
 
 
 @router.get('/overview')

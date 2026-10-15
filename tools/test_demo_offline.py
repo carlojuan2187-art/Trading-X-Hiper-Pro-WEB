@@ -421,6 +421,37 @@ class DemoOfflineTests(unittest.TestCase):
         with self.assertRaises(ledger.Conflict):
             ledger.save(acc, {**acc, 'enabled': True})
 
+    def test_admin_global_demo_reset_all_accounts_preserves_capital_and_pauses(self):
+        a = ledger.change_status(7, active=True)
+        ledger.change_status(8, active=True)
+        update = copy.deepcopy(a)
+        update['history'] = [{'strategy_id': 'mtf_simple', 'pnl_net_usdc': -3}]
+        update['trades_closed'] = 1
+        update['losses'] = 1
+        update['balance_usdc'] = 97
+        ledger.save(a, update)
+        result = ledger.reset_all_demo_accounts()
+        self.assertEqual(result['reset_accounts'], 2)
+        for uid in (7, 8):
+            row = ledger.read(uid)
+            self.assertFalse(row['enabled'])
+            self.assertIsNone(row['position'])
+            self.assertEqual(row['history'], [])
+            self.assertEqual(row['trades_closed'], 0)
+            self.assertEqual(row['balance_usdc'], row['initial_equity_usdc'])
+        self.assertEqual(fake_leases.rows, {})
+
+    def test_admin_global_demo_reset_refuses_open_positions_without_mutation(self):
+        a = ledger.change_status(7, active=True)
+        opened = simulator.open_position(a, signal(), 100, 100.1)
+        ledger.save(a, opened)
+        before = ledger.read(7)
+        with self.assertRaisesRegex(ValueError, 'posiciones abiertas'):
+            ledger.reset_all_demo_accounts()
+        after = ledger.read(7)
+        self.assertEqual(before['position'], after['position'])
+        self.assertEqual(before['version'], after['version'])
+
     def test_reset_safety(self):
         acc = ledger.change_status(7, active=True)
         with self.assertRaises(ValueError):

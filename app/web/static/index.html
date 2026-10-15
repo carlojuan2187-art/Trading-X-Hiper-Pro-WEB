@@ -3,13 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#07111d" />
+    <meta name="theme-color" content="#060c14" />
     <title>Trading X Hiper Pro · Trading Desk</title>
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/static/styles.css?v=share-card-pro-20261015-v2" />
+    <link rel="stylesheet" href="/static/market/market-terminal.css?v=terminal-pro-v2-20261014" />
+    <link rel="stylesheet" href="/static/brand-premium.css?v=premium-ui-v1" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="/static/phone-countries.js?v=phone-auth-v1"></script>
   </head>
@@ -20,9 +22,9 @@
 
     <section id="webLoginScreen" class="web-login hidden" aria-labelledby="webLoginTitle">
       <div class="web-login-card">
-        <div class="web-login-logo"><img src="/static/miniapp-logo.png" alt="Hyper League" /></div>
-        <span class="section-tag">HYPER LEAGUE · TRADING PLATFORM</span>
-        <h1 id="webLoginTitle">Bienvenido a Hyper League</h1>
+        <div class="web-login-logo"><img src="/static/miniapp-logo.png" alt="Trading X Hiper Pro" /></div>
+        <span class="section-tag">TRADING X · AUTOMATIZACIÓN PROFESIONAL</span>
+        <h1 id="webLoginTitle">Bienvenido a Trading X Hiper Pro</h1>
         <p class="phone-auth-intro">Accede con tu teléfono y contraseña. Solo tendrás que verificar tu número con Telegram al registrarte.</p>
         <div class="phone-auth-tabs" role="group" aria-label="Tipo de acceso">
           <button id="phoneLoginTab" type="button" class="phone-auth-tab active" aria-pressed="true">Iniciar sesión</button>
@@ -83,11 +85,11 @@
       <div class="main-shell">
         <header class="topbar">
           <div class="topbar-left">
-            <div class="mobile-brand"><div class="brand-mark"><img src="/static/miniapp-logo.png" alt="" /></div><div><strong>Trading X Hiper Pro</strong><span>Trading Desk</span></div></div>
+            <div class="mobile-brand"><div class="brand-mark"><img src="/static/miniapp-logo.png" alt="" /></div><div><strong>TRADING X</strong><span>HIPER PRO</span></div></div>
             <div class="desktop-title"><span class="section-tag">AUTOMATED TRADING PLATFORM</span><h1 id="workspaceTitle">Dashboard</h1></div>
           </div>
           <div class="topbar-actions">
-            <span class="mode-chip"><span class="mode-chip-label">MODE</span><strong>Control Desk</strong></span>
+            <span class="mode-chip"><span class="mode-chip-label">PLATAFORMA</span><strong>Trading automático</strong></span>
             <button class="icon-button" id="refreshButtonTop" type="button" aria-label="Actualizar">↻</button>
             <button class="primary-button compact-button" id="refreshButton" type="button">Actualizar</button>
             <button class="secondary-button compact-button" id="logoutButton" type="button" aria-label="Cerrar sesión">Salir</button>
@@ -95,15 +97,18 @@
         </header>
 
         <div class="mobile-nav-wrap">
-          <nav class="mobile-tabbar" aria-label="Secciones">
-            <button class="tab is-active" data-tab="overview" type="button">Dashboard</button>
-            <button class="tab" data-tab="demo" type="button">DEMO</button>
-            <button class="tab" data-tab="control" type="button">Control</button>
-            <button class="tab" data-tab="billing" type="button">Pagos</button>
-            <button class="tab" data-tab="operations" type="button">Trades</button>
-            <button class="tab hidden" data-tab="system" type="button">Sistema</button>
-            <button class="tab hidden" data-tab="admin" type="button">Admin</button>
+          <nav class="mobile-tabbar" aria-label="Navegación principal">
+            <button class="tab is-active" data-tab="overview" type="button" aria-label="Dashboard"><span class="mobile-nav-icon" aria-hidden="true">▦</span><span>Inicio</span></button>
+            <button class="tab" data-tab="demo" type="button" aria-label="Cuenta DEMO"><span class="mobile-nav-icon" aria-hidden="true">◉</span><span>DEMO</span></button>
+            <button class="tab" data-tab="operations" type="button" aria-label="Operaciones"><span class="mobile-nav-icon" aria-hidden="true">↗</span><span>Operaciones</span></button>
+            <button class="tab" data-tab="control" type="button" aria-label="Control"><span class="mobile-nav-icon" aria-hidden="true">⚙</span><span>Control</span></button>
+            <button id="mobileMoreButton" class="more-trigger" type="button" aria-label="Más secciones" aria-expanded="false" aria-controls="mobileMoreMenu"><span class="mobile-nav-icon" aria-hidden="true">☷</span><span>Más</span></button>
           </nav>
+          <div class="mobile-more-menu" id="mobileMoreMenu" hidden>
+            <button class="tab" data-tab="billing" type="button"><span class="nav-icon" aria-hidden="true">¤</span>Planes y pagos</button>
+            <button class="tab hidden" data-tab="system" type="button"><span class="nav-icon" aria-hidden="true">◈</span>Estado del sistema</button>
+            <button class="tab hidden" data-tab="admin" type="button"><span class="nav-icon" aria-hidden="true">◎</span>Administración</button>
+          </div>
         </div>
 
         <section id="statusBanner" class="status-banner info">Inicializando MiniApp...</section>
@@ -112,8 +117,8 @@
         <section class="panel is-active" data-panel="overview">
   <div class="workspace-heading">
     <div>
-      <span class="section-tag">TRADING DESK · OVERVIEW</span>
-      <h2>Centro de mando</h2>
+      <span class="section-tag">TRADING X · PANEL GENERAL</span>
+      <h2>Tu centro de trading</h2>
       <p>Una lectura ejecutiva del acceso, preparación, capital y rendimiento del sistema.</p>
     </div>
     <div class="workspace-heading-actions">
@@ -121,14 +126,26 @@
     </div>
   </div>
 
-  <div class="kpi-strip" id="dashboardStats"></div>
+  <div class="brand-hero" aria-label="Resumen de la cuenta LIVE">
+    <div class="brand-hero-main">
+      <div class="brand-hero-kicker"><span class="pulse-dot" aria-hidden="true"></span> Cuenta LIVE · datos reales</div>
+      <strong class="brand-hero-value" id="brandHeroEquity">Sin lectura</strong>
+      <div class="brand-hero-sub" id="brandHeroStatus">Consultando estado del motor…</div>
+      <button class="tab brand-hero-link" data-tab="demo" type="button">Ver cuenta DEMO ↗</button>
+    </div>
+    <div class="brand-hero-side">
+      <div class="brand-hero-stat"><span>Resultado 30 días · LIVE</span><strong id="brandHeroPnl">Sin datos</strong></div>
+      <div class="brand-hero-stat"><span>Operaciones 30 días · LIVE</span><strong id="brandHeroTrades">—</strong></div>
+    </div>
+  </div>
+  <details class="advanced-section"><summary>Ver indicadores operativos de la cuenta</summary><div class="kpi-strip" id="dashboardStats"></div></details>
 
   <div class="overview-grid">
     <article class="chart-card chart-card-main">
       <div class="chart-head">
         <div>
-          <span class="section-tag">PERFORMANCE</span>
-          <h3>PnL acumulado</h3>
+          <span class="section-tag">RESULTADOS · LIVE</span>
+          <h3>PnL de operaciones recientes</h3>
           <p>Lectura de las operaciones visibles más recientes.</p>
         </div>
         <div class="chart-legend"><span class="legend-dot positive"></span><span>Resultado neto</span></div>
@@ -178,6 +195,7 @@
     </article>
   </div>
 
+  <details class="advanced-section"><summary>Más estadísticas, plan y referidos</summary>
   <div class="section-grid-two">
     <article class="glass-card panel-card">
       <div class="panel-head">
@@ -208,6 +226,7 @@
     </article>
   </div>
 
+  </details>
   <article class="glass-card panel-card">
     <div class="panel-head">
       <div><span class="section-tag">ACTIVITY</span><h3>Actividad reciente</h3></div>
@@ -246,7 +265,7 @@
           <div id="demoNotice" class="status-banner info" role="status">Cargando cuenta simulada…</div>
           <div class="demo-hero">
             <div class="demo-balance">
-              <small>EQUITY ESTIMADA · USDC SIMULADOS</small>
+              <small>CUENTA DEMO · CAPITAL SIMULADO</small>
               <strong id="demoEquity">—</strong>
               <span id="demoPnl">PnL acumulado: —</span>
             </div>
@@ -713,8 +732,7 @@
       </div>
     </div>
 
-    <link rel="stylesheet" href="/static/market/market-terminal.css?v=terminal-pro-v2-20261014" />
-    <script src="/static/app.js?v=admin-demo-reset-20261015"></script>
+    <script src="/static/app.js?v=premium-ui-v1"></script>
     <script type="module" src="/static/market/market-terminal.js?v=fix-perp-history-chart-20261015"></script>
     <script type="module" src="/static/trade-share/share-trade.js?v=share-card-pro-20261015-v2"></script>
   </body>

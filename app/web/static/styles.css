@@ -399,6 +399,10 @@ body.auth-required .app-frame { display: none; }
 .demo-disclaimer { color:#92a7ba; font-size:11px; line-height:1.7; margin:10px 0 25px; }
 @media (max-width:560px) { .demo-buttons { width:100%; } .demo-buttons button { flex:1 1 100%; } .demo-history-row { align-items:flex-start; } }
 
+.admin-danger-action { border-color: rgba(248,112,127,.55)!important; color: #ffe9e9!important; }
+.admin-danger-action:focus-visible { outline: 3px solid #f58b95; outline-offset: 3px; }
+.admin-danger-action:disabled { opacity: .48; cursor: wait; }
+
 /* Fase 5 · Tarjeta compartible estilo KAELEON, identidad Hyper League */
 .trade-share-trigger { margin-top: 12px; padding: 7px 13px; min-height: 34px; font-weight: 750; border-color: rgba(39,212,255,.3); }
 .demo-history-actions { display:flex; flex-direction:column; align-items:flex-end; gap:6px; }

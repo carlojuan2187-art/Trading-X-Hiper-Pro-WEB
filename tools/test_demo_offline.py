@@ -311,6 +311,18 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertAlmostEqual(history['audit_total_fees_usdc'],
             history['entry_fee_usdc'] + history['exit_fee_usdc'], places=6)
 
+    def test_worker_persists_protected_break_even_stop_immediately(self):
+        acc = ledger.change_status(7, active=True)
+        opened = simulator.open_position(acc, signal(), 100, 100.1)
+        ledger.save(acc, opened)
+        runner = worker.DemoMarketRunner()
+        runner.protected_positions('SOL', 101, 101.1)
+        runner.protected_positions('SOL', 102.8, 102.9)
+        current = ledger.read(7)['position']
+        self.assertTrue(current['demo_be_armed'])
+        self.assertGreater(current['stop_price'], opened['position']['entry_price'])
+        self.assertGreater(current['initial_stop_price'], 0)
+
     def test_worker_buffers_extrema_between_persisted_quotes(self):
         account = ledger.change_status(7, active=True)
         opened = simulator.open_position(account, signal(), 100, 100.1)
@@ -324,6 +336,48 @@ class DemoOfflineTests(unittest.TestCase):
         trade = ledger.read(7)['history'][-1]
         self.assertEqual(trade['audit_quotes'], 2)
         self.assertGreaterEqual(trade['audit_mfe_pct'], high)
+
+    def test_demo_break_even_at_1r_covers_roundtrip_costs_and_uses_current_quote(self):
+        acc = ledger.change_status(7, active=True)
+        opened = simulator.open_position(acc, signal(), 100, 100.1)
+        self.assertTrue(opened['position']['demo_be_enabled'])
+        self.assertAlmostEqual(opened['position']['demo_be_trigger_r'], 1.0)
+        unchanged = simulator.update_position(opened, 101, 101.1)
+        self.assertFalse(unchanged['position']['demo_be_armed'])
+        self.assertEqual(unchanged['position']['stop_price'], 98)
+        armed = simulator.update_position(unchanged, 102.7, 102.8)
+        self.assertTrue(armed['position']['demo_be_armed'])
+        new_stop = armed['position']['stop_price']
+        self.assertGreater(new_stop, opened['position']['entry_price'])
+        self.assertLess(new_stop, 102.7)
+        self.assertEqual(armed['position']['initial_stop_price'], 98)
+        closed = simulator.update_position(armed, new_stop - .01, new_stop + .09)
+        self.assertIsNone(closed['position'])
+        self.assertEqual(closed['history'][-1]['close_reason'], 'BE')
+        self.assertEqual(closed['history'][-1]['initial_stop_price'], 98)
+        self.assertTrue(closed['history'][-1]['demo_be_armed'])
+
+    def test_demo_break_even_short_and_existing_legacy_position(self):
+        acc = ledger.change_status(7, active=True)
+        opened = simulator.open_position(acc, signal('short'), 100, 100.1)
+        first = simulator.update_position(opened, 97, 97.1)
+        self.assertFalse(first['position']['demo_be_armed'])
+        armed = simulator.update_position(first, 96, 96.1)
+        self.assertTrue(armed['position']['demo_be_armed'])
+        stop = armed['position']['stop_price']
+        self.assertLess(stop, opened['position']['entry_price'])
+        closed = simulator.update_position(armed, stop - 0.05, stop + .05)
+        self.assertEqual(closed['history'][-1]['close_reason'], 'BE')
+        # A pre-deployment position must keep its old stop, no retroactive BE.
+        legacy = copy.deepcopy(opened)
+        for key in ('initial_stop_price', 'demo_be_enabled', 'demo_be_trigger_r',
+                    'demo_be_armed', 'demo_be_armed_at', 'demo_be_stop_price'):
+            legacy['position'].pop(key, None)
+        # 95 would reach the original TP=96 and close; use a live quote inside
+        # original SL/TP to verify an older position cannot arm DEMO BE.
+        updated = simulator.update_position(legacy, 98, 98.1)
+        self.assertFalse(updated['position'].get('demo_be_armed', False))
+        self.assertEqual(updated['position']['stop_price'], 103)
 
     def test_long_full_lifecycle_with_net_fees(self):
         acc = ledger.change_status(7, active=True)

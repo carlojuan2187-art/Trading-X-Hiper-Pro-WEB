@@ -28,6 +28,15 @@ STRATEGY_MODEL = "liquidity_sweep_reversal_5m_v2_audit"
 
 SWEEP_LOOKBACK = 34
 SWEEP_MAX_AGE_BARS = 8
+# DEMO isolated experiment; LIVE retains the 8-bar setup age.
+DEMO_LIQUIDITY_MAX_SWEEP_AGE_BARS = max(
+    1, min(SWEEP_MAX_AGE_BARS, int(os.getenv('DEMO_LIQUIDITY_MAX_SWEEP_AGE_BARS', '4'))))
+
+
+def _sweep_age_limit(market_context: dict) -> int:
+    return (DEMO_LIQUIDITY_MAX_SWEEP_AGE_BARS
+            if market_context.get('_execution_mode') == 'demo' else SWEEP_MAX_AGE_BARS)
+
 SWEEP_MIN_DEPTH_ATR = 0.14
 SWEEP_MIN_WICK_RATIO = 0.30
 SWEEP_MIN_RVOL = 0.65
@@ -275,6 +284,7 @@ def _detect_long_sweep(
     ema20: List[float],
     ema50: List[float],
     atr_value: float,
+    *, max_age_bars: int = SWEEP_MAX_AGE_BARS,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     if len(c) < max(SWEEP_LOOKBACK + SWEEP_MAX_AGE_BARS + 6, 90):
         return False, "NOT_ENOUGH_BARS", {}
@@ -287,7 +297,7 @@ def _detect_long_sweep(
     def reject(reason: str) -> None:
         failures[reason] = failures.get(reason, 0) + 1
 
-    for sweep_idx in range(max(SWEEP_LOOKBACK + 2, trigger_idx - SWEEP_MAX_AGE_BARS), trigger_idx):
+    for sweep_idx in range(max(SWEEP_LOOKBACK + 2, trigger_idx - max_age_bars), trigger_idx):
         examined += 1
         left_start = max(0, sweep_idx - SWEEP_LOOKBACK)
         if sweep_idx - left_start < 12:
@@ -317,7 +327,7 @@ def _detect_long_sweep(
             continue
 
         bars_since_sweep = trigger_idx - sweep_idx
-        if bars_since_sweep <= 0 or bars_since_sweep > SWEEP_MAX_AGE_BARS:
+        if bars_since_sweep <= 0 or bars_since_sweep > max_age_bars:
             reject("SWEEP_EXPIRED")
             continue
 
@@ -405,6 +415,7 @@ def _detect_short_sweep(
     ema20: List[float],
     ema50: List[float],
     atr_value: float,
+    *, max_age_bars: int = SWEEP_MAX_AGE_BARS,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     if len(c) < max(SWEEP_LOOKBACK + SWEEP_MAX_AGE_BARS + 6, 90):
         return False, "NOT_ENOUGH_BARS", {}
@@ -417,7 +428,7 @@ def _detect_short_sweep(
     def reject(reason: str) -> None:
         failures[reason] = failures.get(reason, 0) + 1
 
-    for sweep_idx in range(max(SWEEP_LOOKBACK + 2, trigger_idx - SWEEP_MAX_AGE_BARS), trigger_idx):
+    for sweep_idx in range(max(SWEEP_LOOKBACK + 2, trigger_idx - max_age_bars), trigger_idx):
         examined += 1
         left_start = max(0, sweep_idx - SWEEP_LOOKBACK)
         if sweep_idx - left_start < 12:
@@ -447,7 +458,7 @@ def _detect_short_sweep(
             continue
 
         bars_since_sweep = trigger_idx - sweep_idx
-        if bars_since_sweep <= 0 or bars_since_sweep > SWEEP_MAX_AGE_BARS:
+        if bars_since_sweep <= 0 or bars_since_sweep > max_age_bars:
             reject("SWEEP_EXPIRED")
             continue
 
@@ -570,8 +581,11 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> Dict[str, Any]:
         if atr_pct > ATR_PCT_MAX:
             return {"signal": False, "reason": "ATR_TOO_HIGH", "coin": coin, "diag": {"atr_pct": round(atr_pct, 6)}}
 
-        long_ok, long_reason, long_diag = _detect_long_sweep(o, h, l, c, v, ema20, ema50, atr_value)
-        short_ok, short_reason, short_diag = _detect_short_sweep(o, h, l, c, v, ema20, ema50, atr_value)
+        age_limit = _sweep_age_limit(market_context)
+        long_ok, long_reason, long_diag = _detect_long_sweep(
+            o, h, l, c, v, ema20, ema50, atr_value, max_age_bars=age_limit)
+        short_ok, short_reason, short_diag = _detect_short_sweep(
+            o, h, l, c, v, ema20, ema50, atr_value, max_age_bars=age_limit)
 
         if not long_ok and not short_ok:
             if LOG_SIGNAL_DIAGNOSTICS:
@@ -693,6 +707,7 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> Dict[str, Any]:
             "sweep_level": float(candidate.get("liquidity_level") or 0.0),
             "sweep_idx": int(candidate.get("sweep_idx") or 0),
             "bars_since_sweep": int(candidate.get("bars_since_sweep") or 0),
+            "sweep_age_limit_bars": int(age_limit),
             "sweep_depth_atr": float(candidate.get("sweep_depth_atr") or 0.0),
             "sweep_wick_ratio": float(candidate.get("sweep_wick_ratio") or 0.0),
             "sweep_rvol": float(candidate.get("sweep_rvol") or 0.0),
@@ -708,7 +723,7 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> Dict[str, Any]:
             _log(
                 f"SIGNAL coin={coin} dir={direction} close_5={out['close_5']} adx5={adx5:.2f} atr_pct={atr_pct:.6f} "
                 f"score={out['score']:.2f} strength={out['strength']:.4f} sweep_depth_atr={out['sweep_depth_atr']:.4f} "
-                f"bars_since_sweep={out['bars_since_sweep']} rr={out['rr_estimate']:.4f} sl_pct={out['sl_price_pct']:.6f} "
+                f"bars_since_sweep={out['bars_since_sweep']} age_limit={out['sweep_age_limit_bars']} rr={out['rr_estimate']:.4f} sl_pct={out['sl_price_pct']:.6f} "
                 f"tp_fixed={out['tp_activation_price']:.6f} tp_rr={out['tp_rr_multiple']:.4f} struct_tp={out['structural_tp_pct']:.6f} "
                 f"be_act={out['break_even_activation_price']:.6f} be_offset={out['break_even_offset_price']:.6f}"
             )

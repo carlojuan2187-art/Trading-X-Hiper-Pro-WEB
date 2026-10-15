@@ -95,6 +95,7 @@ risk_module.validate_trade_conditions = lambda balance, strength: {'ok': True, '
 sys.modules['app.risk'] = risk_module
 engine = types.ModuleType('app.trading_engine')
 engine.MIN_TRADE_STRENGTH = 0.18
+engine.get_ranked_symbols = lambda **kw: []
 engine.MIN_CAPITAL_USDC = 3
 engine.MIN_NOTIONAL_USDC = 10
 engine.MIN_QTY_COIN = 0.0001
@@ -593,10 +594,37 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertIsNotNone(simulator.open_position(closed, signal(), 100, 100.1))
 
 
+    def test_demo_preentry_liquidity_filters_nonexecutable_books(self):
+        from app.demo.simulator import required_book_notional
+        acc = ledger.change_status(7, active=True)
+        required = required_book_notional(acc)
+        self.assertGreater(required, 1400)
+        self.assertLess(required, 1500)
+        picked = signal()
+        picked['symbol'] = 'LIQUID-PERP'
+        picked['scanner'] = {'top_book_notional': 3000}
+        captured = []
+        def selector(uid, excluded, *, execution_mode):
+            captured.append((uid, set(excluded), execution_mode))
+            return picked
+        with patch.object(engine, 'get_ranked_symbols', return_value=[
+                {'symbol': 'THIN-PERP', 'top_book_notional': 350},
+                {'symbol': 'LIQUID-PERP', 'top_book_notional': 3000},
+        ]), patch.object(engine, '_select_best_signal_from_scanner_shortlist', side_effect=selector):
+            runner = worker.DemoMarketRunner()
+            pending, offset = runner.collect_signals()
+        self.assertEqual(captured, [(7, {'THIN-PERP'}, 'demo')])
+        self.assertIn(7, pending)
+        self.assertEqual(pending[7][0]['symbol'], 'LIQUID-PERP')
+
     def test_demo_book_depth_must_cover_order_notional(self):
         acc = ledger.change_status(7, active=True)
         too_thin = signal()
         too_thin["scanner"] = {"top_book_notional": 500}
+        diag = {}
+        self.assertIsNone(simulator.open_position(acc, too_thin, 100, 100.1, rejection=diag))
+        self.assertEqual(diag['reason'], 'SCANNER_BOOK_BELOW_ORDER')
+        self.assertGreater(diag['required_usdc'], 1400)
         # Capital de prueba 100 USDC y 10x; 500 USDC de book no cubre 1.5x.
         self.assertIsNone(simulator.open_position(acc, too_thin, 100, 100.1))
         liquid = signal()

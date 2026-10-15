@@ -17,7 +17,12 @@ const KEY = 'hyperleague-level', ZONE = 'hyperleague-zone', MARK = 'hyperleague-
 const GROUPS = { levels: 'hl-levels', zones: 'hl-zones', markers: 'hl-markers', drawings: 'hl-drawings' };
 const fmt = (v, digits = 5) => Number.isFinite(Number(v)) ? Number(v).toLocaleString('en-US', { maximumFractionDigits: digits }) : '—';
 const num = value => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null;
-const coin = symbol => String(symbol || '').toUpperCase().replace(/[-/](USDC|USDT)$/i, '').replace(/_USDC$/i, '').replace(/_USDT$/i, '');
+// Trade records use FET-PERP (DEMO and legacy LIVE); public Hyperliquid
+// candleSnapshot / l2Book / candle subscriptions require the native coin FET.
+// Normalize quotes first, then legacy perpetual suffix. Keep HIP-3 "dex:COIN".
+const coin = symbol => String(symbol || '').trim().toUpperCase()
+  .replace(/[-/_](USDC|USDT)$/i, '')
+  .replace(/-PERP$/i, '');
 const frame = period => Object.keys(FRAMES).find(k => FRAMES[k].type === period?.type && FRAMES[k].span === period?.span) || '5m';
 const bar = row => {
   const timestamp = Number(row.timestamp ?? row.t);
@@ -355,6 +360,16 @@ class Terminal {
       if(!Array.isArray(items))throw new Error('Catálogo inválido');
       this.instrumentCache=items;
       this.instruments=new Set(items.map(x=>x.symbol));
+      // Historical/delisted symbols can remain in DEMO ledger indefinitely.
+      // An unsupported coin must never poison the OHLCV loader or repeatedly
+      // reconnect public WebSockets. Display an available chart instead.
+      if(!this.instruments.has(this.symbol)){
+        const previous=this.symbol;
+        const fallback=this.instruments.has('BTC') ? 'BTC' : items[0]?.symbol;
+        this.follow=false;
+        if(fallback)this.choose(fallback,false);
+        this.notice(`El contrato ${previous} ya no está disponible en Hyperliquid; mostrando ${fallback || 'sin gráfico'}.`, 'error');
+      }
       if(!this.symbolResults.hidden||document.activeElement===this.symbolInput)this.renderSymbolResults(this.symbolInput.value,true);
     }catch(e){if(generation===this.instrumentGeneration)this.notice(`Catálogo no disponible: ${e.message}`,'error');}
   }
@@ -386,16 +401,26 @@ class Terminal {
     this.symbolToggle.setAttribute('aria-expanded',String(!this.symbolResults.hidden));
   }
   choose(symbol, follow) {
-    if(!this.instruments.has(symbol) && !follow){this.notice('Contrato no disponible en el catálogo','error');return;}
-    if(!symbol || (symbol===this.symbol && !follow)) { this.symbolInput.value=this.symbol; return; }
+    const nativeSymbol=coin(symbol);
+    // Never send FET-PERP, FET-PERP/USDC or arbitrary historical strings to
+    // Hyperliquid. All chart and WebSocket requests must use native symbols.
+    if(!/^[A-Z0-9_:]{1,48}$/.test(nativeSymbol) ||
+       (this.instrumentCache && !this.instruments.has(nativeSymbol)) ||
+       (!follow && !this.instruments.has(nativeSymbol))){
+      if(follow)this.follow=false;
+      this.symbolInput.value=this.symbol;
+      this.notice(`El contrato ${String(symbol || '')} no está disponible en Hyperliquid.`, 'error');
+      return;
+    }
+    if(!nativeSymbol || (nativeSymbol===this.symbol && !follow)) { this.symbolInput.value=this.symbol; return; }
     this.follow = follow;
-    this.symbol = symbol;
-    this.symbolInput.value = symbol;
+    this.symbol = nativeSymbol;
+    this.symbolInput.value = nativeSymbol;
     this.book = null; this.trades = []; this.assetContext = null; this.prevPrice=null;this.quotePrice=null;this.priceSource=null;
     this.tickPrice.textContent='—';this.tickPrice.dataset.direction='flat';this.tickArrow.textContent='●';this.tickArrow.dataset.direction='flat';this.chart?.setLastPrice?.(null);
     this.drawMicro();
     this.overlayKey = '';
-    if (this.chart) this.chart.setSymbol({ ticker: symbol, pricePrecision: 6, volumePrecision: 4 });
+    if (this.chart) this.chart.setSymbol({ ticker: nativeSymbol, pricePrecision: 6, volumePrecision: 4 });
     // setSymbol provoca unsubscribe/subscribe y abre exactamente un WebSocket.
     this.applyOverlays(); this.updateSummary();
   }

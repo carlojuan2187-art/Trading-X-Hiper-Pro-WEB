@@ -5,6 +5,8 @@ on:
       - 'app/market_scanner.py'
       - 'app/trading_engine.py'
       - 'app/demo/simulator.py'
+      - 'app/demo/worker.py'
+      - 'app/demo/audit.py'
       - 'app/strategies/breakout_reset.py'
       - 'app/web/static/market/market-terminal.js'
       - 'app/market/terminal.py'

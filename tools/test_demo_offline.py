@@ -59,7 +59,7 @@ class FakeCollection:
         row = self.rows.get(query['_id'])
         return copy.deepcopy(row) if row and self._matches(row, query) else None
 
-    def find(self, query):
+    def find(self, query, projection=None):
         return [copy.deepcopy(v) for v in self.rows.values() if self._matches(v, query)]
 
     def replace_one(self, query, new):
@@ -111,6 +111,7 @@ engine._resolve_structural_exit_plan = lambda signal, entry_price, direction, fa
 sys.modules['app.trading_engine'] = engine
 market = types.ModuleType('app.hyperliquid_client')
 market.get_best_bid_ask = lambda symbol: (100.0, 100.1)
+market.make_request = lambda *args, **kwargs: []
 market.norm_coin = lambda symbol: str(symbol).strip().upper().removesuffix('-PERP').removesuffix('_PERP')
 sys.modules['app.hyperliquid_client'] = market
 pymongo = types.ModuleType('pymongo')
@@ -290,6 +291,39 @@ class DemoOfflineTests(unittest.TestCase):
         app.dependency_overrides[_require_session_stub] = lambda: {'user_id': 8}
         self.assertEqual(client.get('/api/v1/demo').json()['initial_equity_usdc'], 100)
         self.assertEqual(ledger.read(7)['initial_equity_usdc'], 250)
+
+    def test_trade_audit_favorable_adverse_and_close_snapshot(self):
+        account = ledger.change_status(7, active=True)
+        opened = simulator.open_position(account, signal(), 100, 100.1)
+        pos = opened['position']
+        self.assertEqual(pos['audit_quotes'], 0)
+        good = simulator.update_position(opened, 102, 102.1)
+        self.assertGreater(good['position']['audit_mfe_usdc'], 0)
+        self.assertEqual(good['position']['audit_mae_usdc'], 0)
+        bad = simulator.update_position(good, 99, 99.1)
+        self.assertLess(bad['position']['audit_mae_usdc'], 0)
+        self.assertGreaterEqual(bad['position']['audit_mfe_pct'], good['position']['audit_mfe_pct'])
+        closed = simulator.update_position(bad, 98, 98.1)
+        history = closed['history'][-1]
+        self.assertEqual(history['audit_quotes'], 3)
+        self.assertGreater(history['audit_mfe_pct'], 0)
+        self.assertLess(history['audit_mae_pct'], 0)
+        self.assertAlmostEqual(history['audit_total_fees_usdc'],
+            history['entry_fee_usdc'] + history['exit_fee_usdc'], places=6)
+
+    def test_worker_buffers_extrema_between_persisted_quotes(self):
+        account = ledger.change_status(7, active=True)
+        opened = simulator.open_position(account, signal(), 100, 100.1)
+        ledger.save(account, opened)
+        runner = worker.DemoMarketRunner()
+        runner.protected_positions('SOL', 100.02, 100.12)
+        high = runner.audit_pending[(7, opened['position']['id'])]['audit_mfe_pct']
+        # This tiny favorable move stays buffered without Mongo per book.
+        self.assertGreaterEqual(high, 0)
+        runner.protected_positions('SOL', 98, 98.1)
+        trade = ledger.read(7)['history'][-1]
+        self.assertEqual(trade['audit_quotes'], 2)
+        self.assertGreaterEqual(trade['audit_mfe_pct'], high)
 
     def test_long_full_lifecycle_with_net_fees(self):
         acc = ledger.change_status(7, active=True)

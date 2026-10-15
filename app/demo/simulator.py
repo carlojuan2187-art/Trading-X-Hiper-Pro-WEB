@@ -177,6 +177,11 @@ def open_position(account: dict, selected: dict, bid: float, ask: float,
         'decision_source': 'live_scanner_router',
         'opened_at': now_iso(), 'entry_fee_usdc': entry_fee,
         'mark_price': (bid + ask) / 2, 'unrealized_pnl_usdc': 0.0,
+        'audit_schema': 'bid_ask_observed_v1',
+        'audit_mfe_pct': 0.0, 'audit_mae_pct': 0.0,
+        'audit_mfe_usdc': 0.0, 'audit_mae_usdc': 0.0,
+        'audit_quotes': 0, 'audit_last_quote_at': now_iso(),
+        'audit_max_quote_gap_seconds': 0.0, 'audit_quote_gaps_over_10s': 0,
     }
     updated['position_open'] = True
     updated['last_signal_at'] = now_iso()
@@ -213,16 +218,43 @@ def update_position(account: dict, bid: float, ask: float) -> dict | None:
     else:
         reason = 'SL' if ask >= stop else 'TP' if ask <= target else None
     updated = deepcopy(account)
-    updated['last_tick_at'] = now_iso()
+    quote_at = datetime.now(timezone.utc)
+    updated['last_tick_at'] = quote_at.isoformat()
+    # Read-only audit measures: use the executable opposite bid/ask after
+    # configured slippage, NOT the mid/mark price. Both extremes are gross
+    # price excursions; fee-adjusted net PnL is accounted separately.
+    metrics = updated['position']
+    gross_pct = gross / max(qty * float(position['entry_price']), 1e-12) * 100.0
+    metrics['audit_mfe_pct'] = round(max(0.0, float(position.get('audit_mfe_pct') or 0.0), gross_pct), 6)
+    metrics['audit_mae_pct'] = round(min(0.0, float(position.get('audit_mae_pct') or 0.0), gross_pct), 6)
+    metrics['audit_mfe_usdc'] = _money(max(0.0, float(position.get('audit_mfe_usdc') or 0.0), gross))
+    metrics['audit_mae_usdc'] = _money(min(0.0, float(position.get('audit_mae_usdc') or 0.0), gross))
+    metrics['audit_quotes'] = int(position.get('audit_quotes') or 0) + 1
+    old_quote = position.get('audit_last_quote_at') or position.get('opened_at')
+    try:
+        previous_quote_at = datetime.fromisoformat(str(old_quote))
+        if previous_quote_at.tzinfo is None:
+            previous_quote_at = previous_quote_at.replace(tzinfo=timezone.utc)
+        gap = max(0.0, (quote_at - previous_quote_at).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        gap = 0.0
+    metrics['audit_max_quote_gap_seconds'] = round(max(
+        float(position.get('audit_max_quote_gap_seconds') or 0.0), gap), 3)
+    metrics['audit_quote_gaps_over_10s'] = (int(position.get('audit_quote_gaps_over_10s') or 0)
+                                           + int(gap > 10.0))
+    metrics['audit_last_quote_at'] = quote_at.isoformat()
     if reason is None:
         updated['position']['mark_price'] = mid
         updated['position']['unrealized_pnl_usdc'] = _money(gross - exit_fee)
         return updated
-    closed = {k: v for k, v in position.items() if k != 'unrealized_pnl_usdc'}
+    closed = {k: v for k, v in updated['position'].items() if k != 'unrealized_pnl_usdc'}
     closed.update({
         'exit_price': exit_px, 'closed_at': now_iso(), 'close_reason': reason,
         'exit_fee_usdc': exit_fee, 'pnl_gross_usdc': _money(gross),
         'pnl_net_usdc': _money(net_open), 'result': 'WIN' if net_open > 0 else 'LOSS',
+        'audit_total_fees_usdc': _money(float(position['entry_fee_usdc']) + exit_fee),
+        'audit_exit_vs_stop_pct': round(
+            signed * (exit_px / stop - 1) * 100.0, 6) if stop else None,
     })
     updated['balance_usdc'] = _money(float(updated['balance_usdc']) + gross - exit_fee)
     updated['position'] = None

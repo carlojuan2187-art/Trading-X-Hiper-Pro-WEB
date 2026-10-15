@@ -939,7 +939,39 @@ function renderDashboard(data) {
 
 function renderControl(control) {
   state.control = control;
-  elements.controlReadinessBox.textContent = buildControlSummary(control);
+  const readiness = elements.controlReadinessBox;
+  const checks = document.createElement('div');
+  checks.className = 'control-checklist';
+  const checkRows = [
+    ['Wallet Hyperliquid', control.wallet_configured === true, 'Configurada', 'Pendiente'],
+    ['Clave privada', control.private_key_configured === true, 'Cifrada y registrada', 'No configurada'],
+    ['Políticas', control.terms_accepted === true, 'Aceptadas', 'Por confirmar'],
+    ['Plan', control.plan_active === true, 'Vigente', 'Sin plan activo'],
+  ];
+  for (const [label, okay, positive, negative] of checkRows) {
+    const row = document.createElement('div');
+    row.className = 'control-checkitem';
+    const marker = document.createElement('span');
+    marker.className = okay ? 'check-ok' : 'check-pending';
+    marker.textContent = okay ? '✓' : '!';
+    marker.setAttribute('aria-hidden', 'true');
+    const copy = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = label;
+    const subtitle = document.createElement('span');
+    subtitle.textContent = okay ? positive : negative;
+    copy.append(title, subtitle);
+    row.append(marker, copy);
+    checks.append(row);
+  }
+  const details = document.createElement('details');
+  details.className = 'readiness-technical-details';
+  const summary = document.createElement('summary');
+  summary.textContent = 'Detalles técnicos y bloqueadores';
+  const diagnostics = document.createElement('pre');
+  diagnostics.textContent = buildControlSummary(control);
+  details.append(summary, diagnostics);
+  readiness.replaceChildren(checks, details);
   elements.termsStatusText.textContent = control.terms_accepted ? 'Confirmadas' : 'Pendientes de confirmación';
   elements.acceptTermsButton.disabled = control.terms_accepted;
   elements.activateTradingButton.disabled = !control.activation_ready || isTradingEffectivelyActive(control);

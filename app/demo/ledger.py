@@ -137,6 +137,35 @@ def reset(user_id: int) -> dict:
     raise Conflict('Cuenta ocupada; vuelve a intentar')
 
 
+def reset_all_demo_accounts() -> dict:
+    """Pause all paper traders, then clear history and reset balances.
+
+    This never queries or changes LIVE. Each account update is version-CAS,
+    so a concurrent position entry cannot be overwritten by a stale reset.
+    """
+    accounts = list(COLLECTION.find({}))
+    if any(row.get('position') or row.get('position_open') for row in accounts):
+        raise ValueError('No se puede reiniciar DEMO: hay posiciones abiertas. Espera a que cierren.')
+    for previous in accounts:
+        if previous.get('enabled'):
+            updated = deepcopy(previous)
+            updated['enabled'] = False
+            save(previous, updated)
+    # Verify again after pausing: refuse to discard any concurrent open.
+    accounts = list(COLLECTION.find({}))
+    if any(row.get('position') or row.get('position_open') for row in accounts):
+        raise Conflict('Apertura concurrente detectada; no se borró el historial.')
+    reset_count = 0
+    for previous in accounts:
+        updated = make_account(int(previous['_id']),
+                               initial_equity=previous.get('initial_equity_usdc', DEMO_INITIAL_EQUITY_USDC))
+        updated['created_at'] = previous.get('created_at') or updated['created_at']
+        save(previous, updated)
+        reset_count += 1
+    logger.warning('DEMO_ADMIN_STATS_RESET reset_accounts=%d scope=demo_accounts_only', reset_count)
+    return {'ok': True, 'reset_accounts': reset_count, 'trading_paused': True, 'mode': 'DEMO'}
+
+
 def recent_strategy_metrics(history: list[dict]) -> list[dict]:
     """Estadísticas netas por estrategia sobre historial DEMO retenido (max 200).
 

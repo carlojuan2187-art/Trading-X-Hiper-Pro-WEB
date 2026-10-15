@@ -14,6 +14,10 @@ on:
       - 'app/web/static/market/market-terminal.js'
       - 'app/market/terminal.py'
       - 'app/web/static/index.html'
+      - 'app/web/static/app.js'
+      - 'app/web/static/trade-share/**'
+      - 'app/demo/ledger.py'
+      - 'app/api/routes_admin.py'
       - 'tests/**'
       - 'tools/test_*offline.py'
       - '.github/workflows/demo-signal-regression.yml'
@@ -42,3 +46,5 @@ jobs:
         run: python tools/test_demo_offline.py
       - name: Chart legacy trade symbol regression
         run: node tests/test_market_terminal_aliases.cjs
+      - name: Share card and Admin DEMO reset regression
+        run: node tests/test_share_demo_admin.cjs

@@ -21,7 +21,7 @@ from app.demo import ledger
 from app.demo.settings import DEMO_ENABLED, DEMO_SCAN_SECONDS, DEMO_MAX_USERS_PER_SCAN
 from app.demo.credentials import user_ready
 from app.demo.market_events import decode_book
-from app.demo.simulator import open_position, update_position, entry_gate_reason, required_book_notional
+from app.demo.simulator import open_position, update_position, entry_gate_reason
 from app.hyperliquid_client import norm_coin
 
 
@@ -235,16 +235,11 @@ class DemoMarketRunner:
         for account in pool:
             uid = int(account['_id'])
             try:
-                # The scanner's 250-USDC discovery floor is not an executable
-                # order-book guarantee for this user's configured margin.
-                # Exclude insufficient books BEFORE strategy ranking, otherwise
-                # the best signal can be selected and discarded at final entry.
-                min_book = required_book_notional(account)
-                # Pass the requirement INTO the selector. A separate preliminary
-                # scanner call can refresh before ranking and admit a thin book.
+                # Identical discovery and strategy-ranking gates to LIVE.
+                # Only DEMO execution and the isolated fallback queue differ.
+                # The real order-side depth is checked at simulated entry.
                 selected = engine._select_best_signal_from_scanner_shortlist(
-                    uid, set(), execution_mode='demo', min_top_book_notional=min_book,
-                    demo_fallback_limit=3)
+                    uid, set(), execution_mode='demo', demo_fallback_limit=3)
                 if selected and selected.get('symbol'):
                     pending[uid] = (selected, time.monotonic())
             except Exception:
@@ -358,7 +353,16 @@ async def async_main() -> None:
         raise SystemExit('DEMO_WORKER_MODE=true requerido en servicio worker dedicado')
     ledger.COLLECTION.create_index('enabled')
     ledger.COLLECTION.create_index('position.symbol')
+    from app.strategies.breakout_reset import DEMO_STRATEGY_EXPERIMENTAL
+    from app.config import SCAN_INTERVAL, SCANNER_MIN_TOP_BOOK_NOTIONAL
+    from app.market_scanner import _DEMO_TOP_BOOK_MIN_NOTIONAL
     logger.info('DEMO WebSocket event-driven; no LIVE execution; private keys never loaded')
+    logger.info('DEMO_PARITY_PROFILE scanner_s=%.1f live_scanner_s=%s '
+                'scanner_book_usdc=%.2f live_scanner_book_usdc=%.2f '
+                'strategy_profile=%s book_model=live_directional_impact_band',
+                DEMO_SCAN_SECONDS, SCAN_INTERVAL, _DEMO_TOP_BOOK_MIN_NOTIONAL,
+                SCANNER_MIN_TOP_BOOK_NOTIONAL,
+                'EXPERIMENTAL' if DEMO_STRATEGY_EXPERIMENTAL else 'LIVE_PARITY')
     delay = 1
     while True:
         try:

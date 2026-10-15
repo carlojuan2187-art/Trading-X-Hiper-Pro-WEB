@@ -42,6 +42,20 @@ class DemoAlternativeRankingTests(unittest.TestCase):
         self.assertEqual([x['symbol'] for x in ranked], ['XRP-PERP', 'BTC-PERP', 'SOL-PERP'])
 
 
+class DemoImpactBandDepthTests(unittest.TestCase):
+    def test_depth_sums_only_valid_levels_within_directional_band(self):
+        import math
+        ns = functions('app/market_scanner.py', {'_depth_within_impact_bps'}, {'math': math})
+        calc = ns['_depth_within_impact_bps']
+        asks = [{'px': '100.0', 'sz': '3'}, {'px': '100.1', 'sz': '5'},
+                {'px': '100.3', 'sz': '100'}]
+        bids = [{'px': '99.9', 'sz': '4'}, {'px': '99.8', 'sz': '7'},
+                {'px': '99.5', 'sz': '100'}]
+        self.assertAlmostEqual(calc(asks, 100, is_buy=True, impact_bps=25), 800.5)
+        self.assertAlmostEqual(calc(bids, 99.9, is_buy=False, impact_bps=25), 1098.2)
+        self.assertEqual(calc(asks, float('nan'), is_buy=True, impact_bps=25), 0.0)
+
+
 class DemoExecutableBookTests(unittest.TestCase):
     def test_filters_same_ranked_snapshot_using_real_order_size(self):
         import math

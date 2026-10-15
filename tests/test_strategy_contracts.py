@@ -443,7 +443,7 @@ class DemoBiasExperimentTests(unittest.TestCase):
         self.assertEqual(mtf._h1_bias(tf)[0],'none')
         self.assertEqual(mtf._h1_bias(tf,demo_trial=True)[0],'short')
 
-    def test_demo_eval_passes_mode_without_touching_live(self):
+    def test_demo_parity_default_and_opt_in_experiment_never_changes_live(self):
         from copy import deepcopy
         ctx=StrategyContracts().context(); base=ctx['timeframes']['5m']; h1=deepcopy(base)
         h1['ema200']=[101]*len(h1['c'])
@@ -451,8 +451,12 @@ class DemoBiasExperimentTests(unittest.TestCase):
         def resolve(symbol,interval,*args,**kwargs):
             return h1 if interval=='1h' else base
         with patch.object(mtf,'_resolve_tf_snapshot',side_effect=resolve):
-            self.assertEqual(mtf._evaluate_market_context(ctx)['reason'],'NO_H1_BIAS')
             trial=dict(ctx,_execution_mode='demo')
-            outcome=mtf._evaluate_market_context(trial)
-            self.assertTrue(outcome['signal'], outcome)
-            self.assertEqual(outcome['h1_mode'],'demo_early_transition')
+            self.assertEqual(mtf._evaluate_market_context(ctx)['reason'],'NO_H1_BIAS')
+            with patch.object(mtf, 'DEMO_STRATEGY_EXPERIMENTAL', False):
+                self.assertEqual(mtf._evaluate_market_context(trial)['reason'], 'NO_H1_BIAS')
+            with patch.object(mtf, 'DEMO_STRATEGY_EXPERIMENTAL', True):
+                outcome=mtf._evaluate_market_context(trial)
+                self.assertTrue(outcome['signal'], outcome)
+                self.assertEqual(outcome['h1_mode'],'demo_early_transition')
+                self.assertEqual(mtf._evaluate_market_context(ctx)['reason'],'NO_H1_BIAS')

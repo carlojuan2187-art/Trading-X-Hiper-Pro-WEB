@@ -566,7 +566,7 @@ class DemoOfflineTests(unittest.TestCase):
         seen = []
         def selector(uid, excluded, *, execution_mode, min_top_book_notional=0, demo_fallback_limit=1):
             self.assertEqual(execution_mode, 'demo')
-            self.assertGreater(min_top_book_notional, 0)
+            self.assertEqual(min_top_book_notional, 0)
             self.assertEqual(demo_fallback_limit, 3)
             seen.append(uid)
             return None
@@ -668,12 +668,8 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertIsNotNone(simulator.open_position(closed, signal(), 100, 100.1))
 
 
-    def test_demo_passes_account_liquidity_requirement_into_selector(self):
-        from app.demo.simulator import required_book_notional
-        acc = ledger.change_status(7, active=True)
-        required = required_book_notional(acc)
-        self.assertGreater(required, 1400)
-        self.assertLess(required, 1500)
+    def test_demo_selector_uses_live_scanner_gates_without_extra_book_prefilter(self):
+        ledger.change_status(7, active=True)
         picked = signal()
         picked['symbol'] = 'LIQUID-PERP'
         picked['scanner'] = {'top_book_notional': 3000}
@@ -687,23 +683,32 @@ class DemoOfflineTests(unittest.TestCase):
             pending, offset = runner.collect_signals()
         self.assertEqual(len(captured), 1)
         self.assertEqual(captured[0][:3], (7, set(), 'demo'))
-        self.assertAlmostEqual(captured[0][3], required)
+        self.assertEqual(captured[0][3], 0)
         self.assertIn(7, pending)
         self.assertEqual(pending[7][0]['symbol'], 'LIQUID-PERP')
 
-    def test_demo_book_depth_must_cover_order_notional(self):
+    def test_demo_checks_live_directional_impact_band_book_coverage(self):
         acc = ledger.change_status(7, active=True)
-        too_thin = signal()
-        too_thin["scanner"] = {"top_book_notional": 500}
+        book = {"top_book_notional": 3000,
+                "buy_depth_notional": 2000, "sell_depth_notional": 500}
+        short = signal('short')
+        short["scanner"] = book
         diag = {}
-        self.assertIsNone(simulator.open_position(acc, too_thin, 100, 100.1, rejection=diag))
+        self.assertIsNone(simulator.open_position(acc, short, 100, 100.1, rejection=diag))
         self.assertEqual(diag['reason'], 'SCANNER_BOOK_BELOW_ORDER')
-        self.assertGreater(diag['required_usdc'], 1400)
-        # Capital de prueba 100 USDC y 10x; 500 USDC de book no cubre 1.5x.
-        self.assertIsNone(simulator.open_position(acc, too_thin, 100, 100.1))
-        liquid = signal()
-        liquid["scanner"] = {"top_book_notional": 3000}
-        self.assertIsNotNone(simulator.open_position(acc, liquid, 100, 100.1))
+        self.assertEqual(diag['book_model'], 'impact_band_side')
+        self.assertEqual(diag['side'], 'short')
+        self.assertGreater(diag['required_usdc'], 1090)
+        self.assertLess(diag['required_usdc'], 1100)
+        long = signal('long')
+        long["scanner"] = book
+        opened = simulator.open_position(acc, long, 100, 100.1)
+        self.assertIsNotNone(opened)
+        self.assertGreater(opened['position']['margin_usdc'], 99.0)
+        # No silent 3-USDC downsizing. Fallback for historic L2 metadata fails closed.
+        legacy = signal()
+        legacy["scanner"] = {"top_book_notional": 500}
+        self.assertIsNone(simulator.open_position(acc, legacy, 100, 100.1))
 
 
 if __name__ == '__main__':

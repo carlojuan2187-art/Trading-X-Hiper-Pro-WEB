@@ -26,6 +26,7 @@ from app.config import (
     SCANNER_MIN_TOP_BOOK_NOTIONAL,
     SCANNER_SHORTLIST_DEPTH_FOR_L2,
     SCANNER_L2_CACHE_TTL,
+    EXECUTION_BOOK_IMPACT_BPS,
 )
 from app.hyperliquid_client import make_request
 
@@ -48,9 +49,11 @@ _LAST_UPDATE_TS: float = 0.0
 # Separación absoluta de los resultados del scanner entre DEMO experimental y LIVE.
 _DEMO_LAST_GOOD_RESULTS: List[dict] = []
 _DEMO_LAST_UPDATE_TS: float = 0.0
-# DEMO uses a smaller book-size floor; the simulator STILL checks 1.5x
-# the actual paper notional before opening. LIVE keeps its 2,000 USDC floor.
-_DEMO_TOP_BOOK_MIN_NOTIONAL = env_float("DEMO_SCANNER_MIN_TOP_BOOK_NOTIONAL", 250.0, minimum=250.0)
+# Default parity: same discovery floor as LIVE. DEMO can explicitly
+# override its own threshold for a controlled experiment without touching LIVE.
+_DEMO_TOP_BOOK_MIN_NOTIONAL = env_float(
+    "DEMO_SCANNER_MIN_TOP_BOOK_NOTIONAL",
+    float(SCANNER_MIN_TOP_BOOK_NOTIONAL), minimum=0.0)
 MAX_CACHE_AGE = 300  # 5 minutos
 SCANNER_HTTP_TIMEOUT_SECONDS = max(float(os.getenv("SCANNER_HTTP_TIMEOUT_SECONDS", "4.0") or 4.0), 1.0)
 SCANNER_HTTP_RETRIES = max(int(os.getenv("SCANNER_HTTP_RETRIES", "2") or 2), 1)
@@ -238,6 +241,30 @@ def _score_symbol(symbol: str, info: dict) -> Optional[dict]:
     }
 
 
+def _depth_within_impact_bps(levels: list, best_price: float, *, is_buy: bool,
+                             impact_bps: float) -> float:
+    """Same directional, band-limited L2 depth model as LIVE order execution."""
+    if not math.isfinite(best_price) or best_price <= 0:
+        return 0.0
+    impact = max(float(impact_bps), 0.0) / 10000.0
+    boundary = best_price * (1 + impact if is_buy else 1 - impact)
+    depth = 0.0
+    for level in levels:
+        if not isinstance(level, dict):
+            continue
+        try:
+            price = float(level.get("px") or 0)
+            size = float(level.get("sz") or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not all(math.isfinite(v) and v > 0 for v in (price, size)):
+            continue
+        if (is_buy and price > boundary) or (not is_buy and price < boundary):
+            break
+        depth += price * size
+    return depth
+
+
 def _fetch_l2_quality(symbol: str) -> Optional[dict]:
     coin = _base_coin(symbol)
     if not coin:
@@ -285,6 +312,12 @@ def _fetch_l2_quality(symbol: str) -> Optional[dict]:
             "best_bid_notional": bid_notional,
             "best_ask_notional": ask_notional,
             "top_book_notional": top_book_notional,
+            # Metadata only: LIVE scanner thresholds/ranking remain untouched.
+            # DEMO uses the matching order-side impact-band depth at execution.
+            "buy_depth_notional": _depth_within_impact_bps(
+                asks, best_ask, is_buy=True, impact_bps=EXECUTION_BOOK_IMPACT_BPS),
+            "sell_depth_notional": _depth_within_impact_bps(
+                bids, best_bid, is_buy=False, impact_bps=EXECUTION_BOOK_IMPACT_BPS),
         }
         _L2_QUALITY_CACHE[coin] = (now, dict(out))
         return out
@@ -366,6 +399,9 @@ def _get_live_results(exclude_symbols: Set[str], *,
             "best_ask": float(quality.get("best_ask") or 0.0),
             "liquidity_checked": True,
         })
+        if quality.get("buy_depth_notional") is not None and quality.get("sell_depth_notional") is not None:
+            row["buy_depth_notional"] = round(float(quality["buy_depth_notional"]), 2)
+            row["sell_depth_notional"] = round(float(quality["sell_depth_notional"]), 2)
         results.append(row)
 
     results.sort(key=lambda x: x["score"], reverse=True)

@@ -11,7 +11,10 @@ from copy import deepcopy
 from decimal import Decimal, ROUND_DOWN
 from typing import Any
 
-from app.config import LEVERAGE, EXECUTION_MAX_SPREAD_BPS
+from app.config import (
+    LEVERAGE, EXECUTION_MAX_SPREAD_BPS, EXECUTION_MIN_BOOK_COVERAGE,
+    EXECUTION_BOOK_IMPACT_BPS,
+)
 from app.demo.ledger import append_close, now_iso
 from app.demo.settings import DEMO_SLIPPAGE_BPS, DEMO_TAKER_FEE_BPS
 from app.risk import validate_trade_conditions
@@ -62,20 +65,6 @@ def entry_gate_reason(account: dict, *, now: datetime | None = None) -> str | No
         return 'MIN_CAPITAL'
     return None
 
-def required_book_notional(account: dict) -> float:
-    """Order-book floor for this account's actual configured DEMO margin, not a fixed scanner guess."""
-    balance = _positive(account.get('balance_usdc'))
-    if not balance:
-        return math.inf
-    from app import trading_engine as engine
-    risk = validate_trade_conditions(balance, 1.0)
-    if not risk.get('ok'):
-        return math.inf
-    fee_multiplier = (DEMO_TAKER_FEE_BPS / 10000.0) * LEVERAGE
-    margin = _money(min(float(risk['position_size']), balance / (1 + fee_multiplier) - 0.00000002))
-    return 1.5 * margin * float(LEVERAGE) if margin > 0 else math.inf
-
-
 def open_position(account: dict, selected: dict, bid: float, ask: float,
                   *, rejection: dict | None = None) -> dict | None:
     """Evalúa riesgo, drift y SL/TP ESTRUCTURAL con las funciones originales.
@@ -119,19 +108,27 @@ def open_position(account: dict, selected: dict, bid: float, ask: float,
     notional = margin * float(LEVERAGE)
     if notional < float(engine.MIN_NOTIONAL_USDC):
         return reject('MIN_NOTIONAL', notional=round(notional, 2))
-    # DEMO permite explorar más libros, pero no simula un fill cuyo notional
-    # sobrepase la profundidad disponible observada en el scanner.
-    # La referencia L2 puede envejecer: se conserva además el control de
-    # spread y el modelo de slippage aplicado al bid/ask real del WebSocket.
-    scanner_book = (selected.get('scanner') or {}).get('top_book_notional')
-    if scanner_book is not None:
+    # Parity with LIVE execution: inspect the order's own side within the
+    # configured impact band, with the SAME EXECUTION_MIN_BOOK_COVERAGE ratio.
+    # A legacy scanner snapshot with only top-book data is conservatively
+    # checked using that top level; do not turn missing data into fake depth.
+    scanner = selected.get('scanner') or {}
+    side_key = 'buy_depth_notional' if direction == 'long' else 'sell_depth_notional'
+    book_value = scanner.get(side_key)
+    book_model = 'impact_band_side'
+    if book_value is None:
+        book_value = scanner.get('top_book_notional')
+        book_model = 'top_level_fallback'
+    if book_value is not None:
         try:
-            available_book = float(scanner_book)
+            available_book = float(book_value)
         except (TypeError, ValueError, OverflowError):
-            return reject('INVALID_SCANNER_BOOK')
-        if not math.isfinite(available_book) or available_book < 1.5 * notional:
+            return reject('INVALID_SCANNER_BOOK', side=direction)
+        required_book = float(EXECUTION_MIN_BOOK_COVERAGE) * notional
+        if not math.isfinite(available_book) or available_book < required_book:
             return reject('SCANNER_BOOK_BELOW_ORDER', available_usdc=round(available_book, 2),
-                          required_usdc=round(1.5 * notional, 2), notional_usdc=round(notional, 2))
+                          required_usdc=round(required_book, 2), notional_usdc=round(notional, 2),
+                          side=direction, book_model=book_model, impact_bps=float(EXECUTION_BOOK_IMPACT_BPS))
     entry = fill_price('buy' if direction == 'long' else 'sell', bid, ask)
     drift_ok, drift_diag = engine._entry_drift_check(signal=signal, current_price=entry, direction=direction)
     if not drift_ok:

@@ -100,7 +100,7 @@ function loadArtwork() {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('No se pudo cargar el fondo de la tarjeta.'));
-    img.src = '/static/tradingx-share-background.webp';
+    img.src = '/static/tradingx-share-background.avif';
   });
 }
 

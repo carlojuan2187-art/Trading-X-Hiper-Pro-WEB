@@ -96,6 +96,7 @@ sys.modules['app.risk'] = risk_module
 engine = types.ModuleType('app.trading_engine')
 engine.MIN_TRADE_STRENGTH = 0.18
 engine.get_ranked_symbols = lambda **kw: []
+engine._select_best_signal_from_scanner_shortlist = lambda *_a, **_kw: None
 engine.MIN_CAPITAL_USDC = 3
 engine.MIN_NOTIONAL_USDC = 10
 engine.MIN_QTY_COIN = 0.0001

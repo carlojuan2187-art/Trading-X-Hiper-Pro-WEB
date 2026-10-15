@@ -41,6 +41,8 @@ MTF_PENDING_SETUP_ENABLED = env_bool("MTF_PENDING_SETUP_ENABLED", True)
 DEMO_STRATEGY_EXPERIMENTAL = env_bool("DEMO_STRATEGY_EXPERIMENTAL", False)
 # H1-only DEMO experiment: does not opt into M15 or M5 trial rules.
 DEMO_H1_EARLY_REVERSAL_ENABLED = env_bool("DEMO_H1_EARLY_REVERSAL_ENABLED", False)
+# Independent DEMO-only M15 early trend confirmation; LIVE remains strict.
+DEMO_M15_EARLY_CONFIRMATION_ENABLED = env_bool("DEMO_M15_EARLY_CONFIRMATION_ENABLED", False)
 DEMO_MTF_RESET_TOUCH_TOL_ATR = env_float("DEMO_MTF_RESET_TOUCH_TOL_ATR", 0.58, minimum=0.0)
 DEMO_MTF_CONTINUATION_CONFIRM_TOL_ATR = env_float(
     "DEMO_MTF_CONTINUATION_CONFIRM_TOL_ATR", 0.32, minimum=0.0)
@@ -827,7 +829,11 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> dict:
         if (bias1h == "none" and market_context.get("_execution_mode") == "demo"
                 and DEMO_H1_EARLY_REVERSAL_ENABLED):
             bias1h, diag1h = _demo_h1_early_reversal(tf1h, diag1h)
-        bias15, diag15 = _m15_confirmation(tf15, bias1h, demo_trial=demo_trial)
+        bias15, diag15 = _m15_confirmation(
+            tf15, bias1h,
+            demo_trial=(demo_trial or (market_context.get("_execution_mode") == "demo"
+                                      and DEMO_M15_EARLY_CONFIRMATION_ENABLED)),
+        )
         if bias1h == "none":
             return {"signal": False, "reason": "NO_H1_BIAS", "coin": coin, "diag": diag1h}
         if bias15 == "none":

@@ -403,27 +403,37 @@ body.auth-required .app-frame { display: none; }
 .admin-danger-action:focus-visible { outline: 3px solid #f58b95; outline-offset: 3px; }
 .admin-danger-action:disabled { opacity: .48; cursor: wait; }
 
-/* Fase 5 · Tarjeta compartible estilo KAELEON, identidad Hyper League */
-.trade-share-trigger { margin-top: 12px; padding: 7px 13px; min-height: 34px; font-weight: 750; border-color: rgba(39,212,255,.3); }
+/* Tarjeta compartible, vista previa 4:5 y modal móvil a ancho útil completo. */
+.trade-share-trigger { margin-top:12px; padding:7px 13px; min-height:34px; font-weight:750; border-color:rgba(39,212,255,.3); }
 .demo-history-actions { display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
 .demo-history-actions .trade-share-trigger { margin:0; font-size:10px; }
-.trade-share-backdrop { position:fixed; z-index:1000; inset:0; padding:20px; background:rgba(1,6,12,.90); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:center; overflow:auto; }
-.trade-share-dialog { width:min(520px,100%); max-height:calc(100dvh - 40px); overflow-y:auto; padding:20px; border:1px solid rgba(60,183,230,.25); background:linear-gradient(155deg,#122638,#070f1a); box-shadow:0 25px 90px #000b; border-radius:20px; }
-.trade-share-head { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:13px; }
-.trade-share-head span { color:#79b5d5; font-size:10px; letter-spacing:.16em; font-weight:800; }
-.trade-share-head h2 { font-family:'Space Grotesk',sans-serif; margin:6px 0 0; font-size:21px; }
-.trade-share-close { border:1px solid #345168; background:#132638; color:#eff8ff; width:37px; height:37px; border-radius:10px; flex:none; }
-.trade-share-preview { display:grid; place-items:center; padding:6px; border-radius:14px; background:#05111e; border:1px solid rgba(94,165,207,.15); }
-.trade-share-preview canvas { display:block; width:min(100%,340px); height:auto; aspect-ratio:1080/1280; border-radius:12px; }
-.trade-share-settings { display:flex; gap:14px; flex-wrap:wrap; padding:12px 0; }
-.trade-share-settings label { display:flex; align-items:center; gap:8px; color:#bbd0e1; font-size:12px; cursor:pointer; }
-.trade-share-settings input { accent-color:#25e0a1; width:16px; height:16px; }
+.trade-share-backdrop { position:fixed; z-index:1000; inset:0; padding:12px; background:rgba(1,6,12,.87); backdrop-filter:blur(10px); display:flex; align-items:center; justify-content:center; overflow:auto; }
+.trade-share-dialog { box-sizing:border-box; width:min(720px,100%); max-height:calc(100dvh - 24px); overflow-y:auto; overscroll-behavior:contain; padding:clamp(12px,2.5vw,24px); border:1px solid rgba(230,193,123,.40); background:linear-gradient(155deg,#122638,#070f1a); box-shadow:0 25px 90px #000b; border-radius:20px; }
+.trade-share-head { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:15px; }
+.trade-share-head span { color:#e5be7d; font-size:12px; letter-spacing:.12em; font-weight:800; }
+.trade-share-head h2 { font-family:'Space Grotesk',sans-serif; margin:6px 0 0; font-size:clamp(21px,4vw,27px); }
+.trade-share-close { border:1px solid #527082; background:#132638; color:#eff8ff; width:42px; height:42px; border-radius:11px; flex:none; }
+.trade-share-preview { display:flex; justify-content:center; align-items:center; padding:0; border-radius:14px; background:#07111b; border:1px solid rgba(226,191,119,.25); overflow:hidden; }
+.trade-share-preview canvas { display:block; width:100%; height:auto; aspect-ratio:4/5; border-radius:12px; }
+.trade-share-settings { display:flex; gap:14px; flex-wrap:wrap; padding:16px 0; }
+.trade-share-settings label { display:flex; align-items:center; gap:9px; color:#d3e3ed; font-size:14px; cursor:pointer; }
+.trade-share-settings input { accent-color:#25e0a1; width:19px; height:19px; }
 .trade-share-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-.trade-share-actions button { border-radius:10px; border:1px solid #315775; background:#142b40; color:#e8f8ff; font-size:12px; font-weight:800; min-height:44px; }
+.trade-share-actions button { border-radius:10px; border:1px solid #315775; background:#142b40; color:#e8f8ff; font-size:14px; font-weight:800; min-height:48px; }
 .trade-share-actions button.primary-button { border-color:rgba(37,224,161,.35); background:linear-gradient(120deg,#0c725b,#154f67); }
-.trade-share-note { min-height:16px; margin:0 0 12px; color:#91b3c9; font-size:11px; }
+.trade-share-actions button:disabled { opacity:.55; cursor:wait; }
+.trade-share-note { min-height:18px; margin:0 0 12px; color:#abc7d9; font-size:12px; }
+.trade-share-close:focus-visible,.trade-share-actions button:focus-visible,.trade-share-settings input:focus-visible { outline:3px solid #f3c977; outline-offset:3px; }
 .trade-share-error { position:fixed; z-index:1100; bottom:20px; left:20px; right:20px; max-width:520px; margin:auto; padding:13px 16px; background:#461c29; border:1px solid #ff5c7c; border-radius:12px; color:#ffe4ea; font-size:13px; }
-@media(max-width:600px) { .trade-share-backdrop { padding:8px; align-items:center; } .trade-share-dialog { max-height:calc(100dvh - 16px); padding:13px; } .trade-share-preview canvas { width:min(100%,280px); } .trade-share-actions { grid-template-columns:1fr; } }
+@media(max-width:600px) {
+  .trade-share-backdrop { padding:6px; align-items:center; }
+  .trade-share-dialog { width:100%; max-height:calc(100dvh - 12px); padding:11px; border-radius:17px; }
+  .trade-share-head { gap:8px; }
+  .trade-share-preview { border-radius:10px; }
+  .trade-share-preview canvas { width:100%; border-radius:9px; }
+  .trade-share-settings { gap:12px; }
+  .trade-share-actions { grid-template-columns:1fr; }
+}
 
 /* Acceso telefónico independiente de Telegram OIDC. */
 .web-login-card { text-align:left; width:min(480px,100%); }

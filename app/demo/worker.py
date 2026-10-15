@@ -221,14 +221,10 @@ class DemoMarketRunner:
                 # Exclude insufficient books BEFORE strategy ranking, otherwise
                 # the best signal can be selected and discarded at final entry.
                 min_book = required_book_notional(account)
-                ranked = engine.get_ranked_symbols(execution_mode='demo')
-                excluded = {str(row.get('symbol') or '').upper() for row in ranked
-                            if float(row.get('top_book_notional') or 0) < min_book}
-                if excluded:
-                    logger.info('DEMO book sizing user=%s required_usdc=%.2f excluded=%d candidates=%d',
-                                uid, min_book, len(excluded), len(ranked))
+                # Pass the requirement INTO the selector. A separate preliminary
+                # scanner call can refresh before ranking and admit a thin book.
                 selected = engine._select_best_signal_from_scanner_shortlist(
-                    uid, excluded, execution_mode='demo')
+                    uid, set(), execution_mode='demo', min_top_book_notional=min_book)
                 if selected and selected.get('symbol'):
                     pending[uid] = (selected, time.monotonic())
             except Exception:

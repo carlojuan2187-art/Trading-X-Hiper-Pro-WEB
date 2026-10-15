@@ -83,6 +83,8 @@ sys.modules['app.database'] = db_module
 config_module = types.ModuleType('app.config')
 for k, v in {
     'LEVERAGE': 10, 'EXECUTION_MAX_SPREAD_BPS': 100,
+    'EXECUTION_MIN_BOOK_COVERAGE': 1.10, 'EXECUTION_BOOK_IMPACT_BPS': 25,
+    'SCAN_INTERVAL': 15,
     'MAX_TRADES_PER_DAY': 12, 'MAX_TRADES_PER_HOUR': 4,
     'USER_RISK_MAX_CONSEC_LOSSES': 3, 'USER_RISK_COOLDOWN_SECONDS': 3600,
     'USER_RISK_LOSS_COOLDOWN_SECONDS': 600, 'USER_RISK_PF_WINDOW': 5,

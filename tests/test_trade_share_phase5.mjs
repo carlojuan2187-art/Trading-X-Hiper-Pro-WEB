@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTrade, validateReferral } from '../app/web/static/trade-share/share-trade.js';
+import { normalizeTrade, validateReferral, drawCard, CARD_WIDTH, CARD_HEIGHT } from '../app/web/static/trade-share/share-trade.js';
 import { createQrMatrix } from '../app/web/static/trade-share/qr-code.js';
 
 test('DEMO abierta lleva entrada, capital simulado, beneficio y ROE', () => {
@@ -63,4 +63,38 @@ test('QR local tiene 37x37 módulos y bitmap binario', () => {
 
 test('El QR rechaza enlaces demasiado largos de forma explícita', () => {
   assert.throws(()=>createQrMatrix('https://t.me/'+ 'a'.repeat(120)), /largo/);
+});
+
+
+test('Tarjeta 4:5 dibuja datos completos sin recortar ni depender del AVIF', async () => {
+  const painted = [];
+  const gradient = { addColorStop() {} };
+  const ctx = {
+    createLinearGradient: () => gradient,
+    beginPath() {}, roundRect() {}, rect() {}, clip() {},
+    fill() {}, stroke() {}, fillRect() {}, moveTo() {}, lineTo() {},
+    save() {}, restore() {},
+    measureText(value) { return { width: String(value).length * 17 }; },
+    fillText(value, x, y, maxWidth) { painted.push({ value: String(value), x, y, maxWidth }); },
+    drawImage() { throw new Error('El fallback no debe invocar el arte ausente'); },
+  };
+  const canvas = { width: 0, height: 0, getContext: () => ctx };
+  const data = normalizeTrade('demo-closed', {
+    symbol: 'XRP-PERP', direction: 'LONG', entry_price: 1.307461,
+    exit_price: 1.29984, margin_usdc: 72.79, pnl_net_usdc: -4.9719,
+    leverage: 10, strategy_id: 'liquidity_sweep_reversal', close_reason: 'SL',
+  });
+  await drawCard(canvas, data, null, {}, null);
+  assert.equal(canvas.width, CARD_WIDTH);
+  assert.equal(canvas.height, CARD_HEIGHT);
+  assert.equal(canvas.width / canvas.height, 4 / 5);
+  for (const value of ['XRP-PERP', '1.307461', '1.29984', 'SL', '−4.9719 USDC']) {
+    assert.ok(painted.some((item) => item.value === value), 'Falta ' + value);
+  }
+  assert.ok(painted.every((item) => item.y < CARD_HEIGHT), 'Texto fuera del PNG');
+  painted.length = 0;
+  await drawCard(canvas, data, null, { showRoe: false, showPnl: false }, null);
+  assert.ok(!painted.some((item) => item.value.startsWith('RENTABILIDAD')));
+  assert.ok(!painted.some((item) => item.value.includes('USDC')));
+  assert.ok(painted.some((item) => item.value === '1.307461'));
 });

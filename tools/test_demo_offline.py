@@ -373,7 +373,9 @@ class DemoOfflineTests(unittest.TestCase):
         for key in ('initial_stop_price', 'demo_be_enabled', 'demo_be_trigger_r',
                     'demo_be_armed', 'demo_be_armed_at', 'demo_be_stop_price'):
             legacy['position'].pop(key, None)
-        updated = simulator.update_position(legacy, 95, 95.1)
+        # 95 would reach the original TP=96 and close; use a live quote inside
+        # original SL/TP to verify an older position cannot arm DEMO BE.
+        updated = simulator.update_position(legacy, 98, 98.1)
         self.assertFalse(updated['position'].get('demo_be_armed', False))
         self.assertEqual(updated['position']['stop_price'], 103)
 

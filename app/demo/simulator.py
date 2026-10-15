@@ -16,7 +16,10 @@ from app.config import (
     EXECUTION_BOOK_IMPACT_BPS,
 )
 from app.demo.ledger import append_close, now_iso
-from app.demo.settings import DEMO_SLIPPAGE_BPS, DEMO_TAKER_FEE_BPS
+from app.demo.settings import (
+    DEMO_SLIPPAGE_BPS, DEMO_TAKER_FEE_BPS,
+    DEMO_BREAK_EVEN_ENABLED, DEMO_BREAK_EVEN_TRIGGER_R, DEMO_BREAK_EVEN_BUFFER_BPS,
+)
 from app.risk import validate_trade_conditions
 
 
@@ -49,6 +52,27 @@ def fill_price(side: str, bid: float, ask: float) -> float:
 
 def fee_usdc(notional: float) -> float:
     return _money(notional * DEMO_TAKER_FEE_BPS / 10000.0)
+
+
+def _demo_fee_safe_stop(position: dict) -> float:
+    """Bid (LONG) or ask (SHORT) stop trigger covering modeled round-trip costs.
+
+    This is a dynamic paper stop, not an exchange-guaranteed fill: a gap or
+    WebSocket outage may still cause an actual net loss.
+    """
+    entry = float(position['entry_price'])
+    qty = float(position['quantity'])
+    fee_in = float(position['entry_fee_usdc'])
+    if min(entry, qty) <= 0:
+        return 0.0
+    rate = DEMO_TAKER_FEE_BPS / 10000.0
+    slip = DEMO_SLIPPAGE_BPS / 10000.0
+    buffer = DEMO_BREAK_EVEN_BUFFER_BPS / 10000.0
+    if position['direction'] == 'long':
+        close_fill = (entry + fee_in / qty) / (1.0 - rate) * (1.0 + buffer)
+        return close_fill / (1.0 - slip)
+    close_fill = (entry - fee_in / qty) / (1.0 + rate) * (1.0 - buffer)
+    return close_fill / (1.0 + slip)
 
 
 def entry_gate_reason(account: dict, *, now: datetime | None = None) -> str | None:
@@ -162,6 +186,11 @@ def open_position(account: dict, selected: dict, bid: float, ask: float,
         'margin_usdc': margin, 'requested_margin_usdc': _money(desired_margin), 'leverage': int(LEVERAGE),
         'notional_usdc': _money(qty * entry),
         'stop_price': float(plan['stop_price']), 'target_price': float(plan['target_price']),
+        # Frozen on entry. Older positions lacking these keys remain unchanged.
+        'initial_stop_price': float(plan['stop_price']),
+        'demo_be_enabled': bool(DEMO_BREAK_EVEN_ENABLED),
+        'demo_be_trigger_r': float(DEMO_BREAK_EVEN_TRIGGER_R),
+        'demo_be_armed': False, 'demo_be_armed_at': None, 'demo_be_stop_price': None,
         'rr': float(plan['rr']), 'strategy_id': str(signal.get('strategy_id') or ''),
         'regime_id': str(signal.get('regime_id') or ''),
         'strategy_model': str(signal.get('strategy_model') or ''),
@@ -220,6 +249,24 @@ def update_position(account: dict, bid: float, ask: float) -> dict | None:
     updated = deepcopy(account)
     quote_at = datetime.now(timezone.utc)
     updated['last_tick_at'] = quote_at.isoformat()
+    # Original SL/TP always take precedence. BE may arm only on an executable
+    # bid/ask quote with >=1R *gross* move and positive fee-adjusted net.
+    if reason is None and position.get('demo_be_enabled') and not position.get('demo_be_armed'):
+        original_stop = float(position.get('initial_stop_price') or 0)
+        original_risk = abs(float(position['entry_price']) - original_stop)
+        trigger_r = float(position.get('demo_be_trigger_r') or 0)
+        if original_stop > 0 and original_risk > 0 and trigger_r > 0:
+            move = signed * (exit_px - float(position['entry_price']))
+            if move >= original_risk * trigger_r and net_open > 0:
+                candidate = _demo_fee_safe_stop(position)
+                old_stop = float(position['stop_price'])
+                improved = ((old_stop < candidate < bid) if d == 'long'
+                            else (ask < candidate < old_stop))
+                if math.isfinite(candidate) and candidate > 0 and improved:
+                    updated['position']['stop_price'] = candidate
+                    updated['position']['demo_be_armed'] = True
+                    updated['position']['demo_be_stop_price'] = candidate
+                    updated['position']['demo_be_armed_at'] = quote_at.isoformat()
     # Read-only audit measures: use the executable opposite bid/ask after
     # configured slippage, NOT the mid/mark price. Both extremes are gross
     # price excursions; fee-adjusted net PnL is accounted separately.
@@ -248,8 +295,9 @@ def update_position(account: dict, bid: float, ask: float) -> dict | None:
         updated['position']['unrealized_pnl_usdc'] = _money(gross - exit_fee)
         return updated
     closed = {k: v for k, v in updated['position'].items() if k != 'unrealized_pnl_usdc'}
+    close_reason = 'BE' if reason == 'SL' and bool(position.get('demo_be_armed')) else reason
     closed.update({
-        'exit_price': exit_px, 'closed_at': now_iso(), 'close_reason': reason,
+        'exit_price': exit_px, 'closed_at': now_iso(), 'close_reason': close_reason,
         'exit_fee_usdc': exit_fee, 'pnl_gross_usdc': _money(gross),
         'pnl_net_usdc': _money(net_open), 'result': 'WIN' if net_open > 0 else 'LOSS',
         'audit_total_fees_usdc': _money(float(position['entry_fee_usdc']) + exit_fee),

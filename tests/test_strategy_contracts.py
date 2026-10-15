@@ -158,6 +158,15 @@ class BiasDiagnosticsTests(unittest.TestCase):
 
 
 class LiquidityDiagnosticsTests(unittest.TestCase):
+    def test_demo_sweep_age_is_isolated_from_live(self):
+        from app.strategies import liquidity_sweep_reversal as sweep
+        self.assertEqual(sweep._sweep_age_limit({'_execution_mode': 'live'}), 8)
+        self.assertEqual(sweep._sweep_age_limit({'_execution_mode': 'demo'}), 4)
+        self.assertEqual(sweep._sweep_age_limit({}), 8)
+        with patch.object(sweep, 'DEMO_LIQUIDITY_MAX_SWEEP_AGE_BARS', 8):
+            self.assertEqual(sweep._sweep_age_limit({'_execution_mode': 'demo'}), 8)
+            self.assertEqual(sweep._sweep_age_limit({'_execution_mode': 'live'}), 8)
+
     def test_flat_market_reports_missing_sweep_both_directions(self):
         from app.strategies import liquidity_sweep_reversal as sweep
         for detector in (sweep._detect_long_sweep, sweep._detect_short_sweep):

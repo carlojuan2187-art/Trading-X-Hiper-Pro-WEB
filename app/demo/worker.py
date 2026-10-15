@@ -180,6 +180,9 @@ class DemoMarketRunner:
                                         'audit_mfe_usdc', 'audit_mae_usdc',
                                         'audit_quotes', 'audit_max_quote_gap_seconds',
                                         'audit_quote_gaps_over_10s',
+                                        'initial_stop_price', 'demo_be_enabled',
+                                        'demo_be_armed', 'demo_be_trigger_r',
+                                        'demo_be_stop_price', 'demo_be_armed_at',
                                     )
                                 }, sort_keys=True, default=str))
                     closed += 1
@@ -194,10 +197,22 @@ class DemoMarketRunner:
                     mark = measured_position.get('mark_price')
                     due = time.monotonic() - self.audit_flush_at.get(key, 0.0) >= 30.0
                     changed = not before or abs(float(mark) / float(before) - 1) >= .0005
-                    if due or changed:
+                    be_new = bool(measured_position.get('demo_be_armed')) and not bool(
+                        account['position'].get('demo_be_armed'))
+                    # Save new protective stop immediately even with a tiny
+                    # price movement; do not wait for 30s audit throttle.
+                    if due or changed or be_new:
                         ledger.save(account, updated)
                         self.audit_flush_at[key] = time.monotonic()
                         marked += 1
+                        if be_new:
+                            logger.info('DEMO_BE_ARMED user=%s symbol=%s entry=%.8f '
+                                        'original_stop=%.8f be_stop=%.8f trigger_r=%.2f',
+                                        account['_id'], symbol,
+                                        float(measured_position['entry_price']),
+                                        float(measured_position['initial_stop_price']),
+                                        float(measured_position['stop_price']),
+                                        float(measured_position['demo_be_trigger_r']))
             except ledger.Conflict:
                 # Don't retain stale, unsaved telemetry after CAS failure.
                 self.audit_pending.pop(key, None)
@@ -240,7 +255,8 @@ class DemoMarketRunner:
                             'margin_usdc', 'leverage', 'notional_usdc',
                             'entry_spread_bps', 'slippage_model_bps',
                             'entry_fee_model_bps', 'entry_fee_usdc',
-                            'opened_at',
+                            'opened_at', 'initial_stop_price',
+                            'demo_be_enabled', 'demo_be_trigger_r',
                         )
                     }, sort_keys=True, default=str))
                 else:
@@ -415,6 +431,14 @@ async def async_main() -> None:
     from app.strategies.breakout_reset import DEMO_STRATEGY_EXPERIMENTAL
     from app.config import SCAN_INTERVAL, SCANNER_MIN_TOP_BOOK_NOTIONAL
     from app.market_scanner import _DEMO_TOP_BOOK_MIN_NOTIONAL
+    from app.demo.settings import DEMO_BREAK_EVEN_ENABLED, DEMO_BREAK_EVEN_TRIGGER_R
+    from app.strategies.liquidity_sweep_reversal import (
+        DEMO_LIQUIDITY_MAX_SWEEP_AGE_BARS, SWEEP_MAX_AGE_BARS,
+    )
+    logger.info('DEMO_EXPERIMENT_PROFILE break_even=%s trigger_r=%.2f '
+                'liquidity_max_age_bars=%s live_liquidity_max_age_bars=%s',
+                DEMO_BREAK_EVEN_ENABLED, DEMO_BREAK_EVEN_TRIGGER_R,
+                DEMO_LIQUIDITY_MAX_SWEEP_AGE_BARS, SWEEP_MAX_AGE_BARS)
     logger.info('DEMO WebSocket event-driven; no LIVE execution; private keys never loaded')
     logger.info('DEMO_PARITY_PROFILE scanner_s=%.1f live_scanner_s=%s '
                 'scanner_book_usdc=%.2f live_scanner_book_usdc=%.2f '

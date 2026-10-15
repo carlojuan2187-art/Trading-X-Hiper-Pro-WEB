@@ -89,6 +89,45 @@ def entry_gate_reason(account: dict, *, now: datetime | None = None) -> str | No
         return 'MIN_CAPITAL'
     return None
 
+# DEMO only: protect the same symbol after a net losing close.
+# This gate is evaluated against persisted history, so it survives redeploys.
+DEMO_LOSS_SYMBOL_COOLDOWN_SECONDS = 30 * 60
+
+
+def demo_symbol_loss_gate(account: dict, selected: dict, *, now: datetime | None = None) -> str | None:
+    symbol = str(selected.get('symbol') or '').upper()
+    if not symbol:
+        return None
+    current = now or datetime.now(timezone.utc)
+    signal = selected.get('signal') or {}
+    direction = str(selected.get('direction') or '').lower()
+    strategy = str(signal.get('strategy_id') or '')
+    reference = float(signal.get('signal_reference_price') or 0)
+    for closed in reversed(account.get('history') or []):
+        if str(closed.get('symbol') or '').upper() != symbol:
+            continue
+        if str(closed.get('result') or '').upper() != 'LOSS' and float(closed.get('pnl_net_usdc') or 0) >= 0:
+            continue
+        try:
+            closed_at = datetime.fromisoformat(str(closed.get('closed_at') or ''))
+            if closed_at.tzinfo is None:
+                closed_at = closed_at.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        elapsed = (current - closed_at).total_seconds()
+        if elapsed < DEMO_LOSS_SYMBOL_COOLDOWN_SECONDS:
+            return 'LOSS_SYMBOL_COOLDOWN'
+        # The 30-minute pause expires, but an identical previously losing
+        # setup must not be traded again. A genuinely new signal is allowed.
+        old_reference = float(closed.get('signal_reference_price') or 0)
+        if (reference > 0 and old_reference > 0
+                and abs(reference - old_reference) <= max(reference, old_reference) * 1e-8
+                and str(closed.get('direction') or '').lower() == direction
+                and str(closed.get('strategy_id') or '') == strategy):
+            return 'LOSS_SIGNAL_ALREADY_TRADED'
+    return None
+
+
 def open_position(account: dict, selected: dict, bid: float, ask: float,
                   *, rejection: dict | None = None) -> dict | None:
     """Evalúa riesgo, drift y SL/TP ESTRUCTURAL con las funciones originales.
@@ -103,6 +142,9 @@ def open_position(account: dict, selected: dict, bid: float, ask: float,
     gate = entry_gate_reason(account)
     if gate is not None:
         return reject('ENTRY_GATE', gate=gate)
+    loss_gate = demo_symbol_loss_gate(account, selected)
+    if loss_gate:
+        return reject(loss_gate, symbol=str(selected.get('symbol') or '').upper())
     direction = str(selected.get('direction') or '').lower()
     if direction not in {'long', 'short'}:
         return reject('INVALID_DIRECTION')

@@ -656,7 +656,7 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertIsNone(simulator.entry_gate_reason(acc, now=now))
         self.assertIsNotNone(simulator.open_position(acc, signal(), 100, 100.1))
 
-    def test_loss_immediate_reentry_without_cooldown_but_tracks_losses(self):
+    def test_loss_symbol_cooldown_and_losing_signal_dedup(self):
         acc = ledger.change_status(7, active=True)
         opened = simulator.open_position(acc, signal(), 100, 100.1)
         self.assertIsNotNone(opened)
@@ -664,10 +664,22 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertIsNone(closed['position'])
         self.assertEqual(closed['losses'], 1)
         self.assertEqual(closed['risk_consecutive_losses'], 1)
-        self.assertIsNone(closed.get('risk_cooldown_until'))
-        self.assertIsNone(closed.get('risk_cooldown_reason'))
         self.assertIsNone(simulator.entry_gate_reason(closed))
-        self.assertIsNotNone(simulator.open_position(closed, signal(), 100, 100.1))
+        rejected = {}
+        self.assertIsNone(simulator.open_position(closed, signal(), 100, 100.1, rejection=rejected))
+        self.assertEqual(rejected['reason'], 'LOSS_SYMBOL_COOLDOWN')
+        other = signal()
+        other['symbol'] = 'BTC-PERP'
+        self.assertIsNotNone(simulator.open_position(closed, other, 100, 100.1))
+        # After thirty minutes, the exact losing setup remains consumed.
+        from datetime import timedelta, datetime, timezone
+        closed['history'][-1]['closed_at'] = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
+        rejected = {}
+        self.assertIsNone(simulator.open_position(closed, signal(), 100, 100.1, rejection=rejected))
+        self.assertEqual(rejected['reason'], 'LOSS_SIGNAL_ALREADY_TRADED')
+        fresh = signal()
+        fresh['signal']['signal_reference_price'] = 100.06
+        self.assertIsNotNone(simulator.open_position(closed, fresh, 100, 100.1))
 
     def test_nonnegotiable_demo_guards_remain(self):
         acc = ledger.change_status(7, active=True)

@@ -79,80 +79,93 @@ function fitText(ctx, value, maxWidth) {
   while (ctx.measureText(textValue).width > maxWidth && textValue.length > 1) textValue = `${textValue.slice(0, -2)}…`;
   return textValue;
 }
-function cell(ctx, x, y, title, value, width, color = '#f1f7fd') {
-  roundRect(ctx, x, y, width, 102, 18);
-  ctx.fillStyle = 'rgba(7,20,34,0.94)'; ctx.fill();
-  ctx.strokeStyle = 'rgba(132,168,201,0.20)'; ctx.lineWidth = 2; ctx.stroke();
-  label(ctx, title, x + 20, y + 30, 18, '#8da6bc', 600);
-  ctx.font = '750 28px Inter, system-ui, sans-serif';
-  label(ctx, fitText(ctx, value, width - 38), x + 20, y + 70, 28, color, 750);
+// Trade facts are plain text over the user-supplied artwork; no stat tiles.
+function drawText(ctx, value, x, y, size, color, weight = 750, maxWidth = 930) {
+  ctx.save();
+  ctx.font = `${weight} ${size}px Inter, system-ui, sans-serif`;
+  ctx.textBaseline = 'alphabetic';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(3, size / 12);
+  ctx.strokeStyle = 'rgba(0,0,0,.9)';
+  ctx.shadowColor = 'rgba(0,0,0,.95)';
+  ctx.shadowBlur = 11;
+  const txt = fitText(ctx, String(value), maxWidth);
+  ctx.strokeText(txt, x, y);
+  ctx.fillStyle = color;
+  ctx.fillText(txt, x, y);
+  ctx.restore();
 }
-function loadLogo() {
-  return new Promise((resolve) => {
+function loadArtwork() {
+  return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = '/static/miniapp-logo.png';
+    img.onerror = () => reject(new Error('No se pudo cargar el fondo de la tarjeta.'));
+    img.src = '/static/tradingx-share-background.webp';
   });
 }
 
-export async function drawCard(canvas, snapshot, referral, options = {}, logo = null) {
+export async function drawCard(canvas, snapshot, referral, options = {}, artwork = null) {
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Tu navegador no puede generar tarjetas PNG.');
+  if (!artwork?.naturalWidth || !artwork?.naturalHeight) throw new Error('Fondo de marca no disponible.');
   canvas.width = 1080; canvas.height = 1280;
-  const ok = (snapshot.pnl ?? 0) >= 0;
-  const accent = ok ? '#27e6a8' : '#ff5c7c';
-  const bg = ctx.createLinearGradient(0, 0, 1080, 1280);
-  bg.addColorStop(0, '#10273a'); bg.addColorStop(.48, '#06101e'); bg.addColorStop(1, '#030a13');
-  ctx.fillStyle = bg; ctx.fillRect(0, 0, 1080, 1280);
-  ctx.save(); ctx.globalAlpha = .14;
-  for (let x = -300; x < 1500; x += 46) { ctx.strokeStyle = '#66c8ed'; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 280, 1280); ctx.stroke(); }
-  ctx.restore();
-  const glow = ctx.createRadialGradient(860, 300, 0, 860, 300, 600);
-  glow.addColorStop(0, ok ? 'rgba(39,230,168,.28)' : 'rgba(255,92,124,.25)'); glow.addColorStop(1, 'transparent');
-  ctx.fillStyle = glow; ctx.fillRect(0, 0, 1080, 940);
-  ctx.strokeStyle = ok ? 'rgba(39,230,168,.65)' : 'rgba(255,92,124,.65)'; ctx.lineWidth = 4;
-  roundRect(ctx, 30, 30, 1020, 1220, 38); ctx.stroke();
-  if (logo) { ctx.save(); roundRect(ctx, 70, 72, 92, 92, 18); ctx.clip(); ctx.drawImage(logo, 70, 72, 92, 92); ctx.restore(); }
-  label(ctx, 'TRADING X', logo ? 184 : 78, 122, 40, '#f2f8ff', 900);
-  label(ctx, 'HIPER PRO · HYPERLIQUID', logo ? 184 : 78, 155, 20, '#8cacbd', 700);
-  roundRect(ctx, 74, 196, 160, 49, 18); ctx.fillStyle = snapshot.mode === 'DEMO' ? '#12395b' : '#194a37'; ctx.fill();
-  label(ctx, snapshot.mode, 98, 228, 25, '#e5f9ff', 800);
-  roundRect(ctx, 249, 196, 184, 49, 18); ctx.fillStyle = snapshot.status === 'ABIERTA' ? '#153047' : '#263444'; ctx.fill();
-  label(ctx, snapshot.status, 272, 228, 24, '#e5f9ff', 800);
-  roundRect(ctx, 450, 196, 160, 49, 18); ctx.fillStyle = snapshot.side === 'SHORT' ? '#64283d' : '#164c3f'; ctx.fill();
-  label(ctx, snapshot.side, 476, 228, 25, '#f2fbff', 800);
-  label(ctx, snapshot.symbol, 74, 336, 72, '#f5faff', 900);
-  label(ctx, `${snapshot.strategy || 'TRADING AUTOMÁTICO'}${snapshot.leverage ? ` · ${snapshot.leverage}x` : ''}`, 78, 383, 24, '#9fb5cc', 650);
-  label(ctx, `Compartida: ${new Date(snapshot.sharedAt).toLocaleString('es-ES')}`, 78, 409, 16, '#819bb1', 600);
-  ctx.fillStyle = 'rgba(5,15,26,.86)'; roundRect(ctx, 68, 424, 944, 265, 32); ctx.fill();
-  ctx.strokeStyle = 'rgba(125,169,196,.24)'; ctx.lineWidth = 2; ctx.stroke();
+  // Square artwork: center crop, never stretch the golden X.
+  const w = artwork.naturalWidth, h = artwork.naturalHeight;
+  const cropW = Math.min(w, h * canvas.width / canvas.height);
+  const cropH = Math.min(h, w * canvas.height / canvas.width);
+  ctx.drawImage(artwork, (w-cropW)/2, (h-cropH)/2, cropW, cropH, 0, 0, 1080, 1280);
+  // Gradient tint is transparent; there are no opaque cards over the logo.
+  const shade = ctx.createLinearGradient(0, 0, 0, 1280);
+  shade.addColorStop(0, 'rgba(0,0,0,.78)');
+  shade.addColorStop(.30, 'rgba(0,0,0,.28)');
+  shade.addColorStop(.54, 'rgba(0,0,0,.09)');
+  shade.addColorStop(.72, 'rgba(0,0,0,.3)');
+  shade.addColorStop(1, 'rgba(0,0,0,.83)');
+  ctx.fillStyle = shade; ctx.fillRect(0, 0, 1080, 1280);
+  const accent = (snapshot.pnl ?? 0) >= 0 ? '#66ffab' : '#ff788a';
+  const white = '#fff8e8';
+  drawText(ctx, 'TRADING X HIPER PRO', 65, 94, 44, white, 900);
+  drawText(ctx, `${snapshot.mode}   ·   ${snapshot.status}   ·   ${snapshot.side}`,
+           67, 149, 26, '#ffe8b3', 800);
+  drawText(ctx, snapshot.symbol, 65, 265, 75, white, 900);
+  drawText(ctx, `${snapshot.strategy || 'TRADING AUTOMÁTICO'}${snapshot.leverage ? ` · ${snapshot.leverage}x` : ''}`,
+           67, 317, 27, '#eaf3ec', 720);
   if (options.showRoe !== false) {
-    label(ctx, 'ROI / ROE', 108, 484, 25, '#a0b5c9', 700);
-    label(ctx, percentage(snapshot.roe), 103, 583, 75, accent, 900);
+    drawText(ctx, 'ROE', 65, 388, 28, '#ffebbd', 800);
+    drawText(ctx, percentage(snapshot.roe), 64, 479, 88, accent, 900);
   }
   if (options.showPnl !== false) {
-    label(ctx, snapshot.grossEstimate ? 'PnL bruto estimado · sin fees' : snapshot.estimated ? 'PnL flotante estimado' : snapshot.status === 'ABIERTA' ? 'PnL flotante registrado' : 'PnL neto', 108, 637, 23, '#9fb5c9', 700);
-    label(ctx, money(snapshot.pnl), 350, 637, 37, accent, 850);
+    const caption = snapshot.grossEstimate ? 'PnL BRUTO ESTIMADO'
+      : snapshot.estimated ? 'PnL FLOTANTE ESTIMADO'
+      : snapshot.status === 'ABIERTA' ? 'PnL FLOTANTE' : 'PnL NETO REALIZADO';
+    const posY = options.showRoe !== false ? 553 : 445;
+    drawText(ctx, caption, 67, posY, 26, '#ffe8b3', 800);
+    drawText(ctx, money(snapshot.pnl), 65, posY + 80, 62, accent, 900, 950);
   }
-  if (options.showPnl === false && options.showRoe === false) label(ctx, 'DETALLES DE OPERACIÓN', 108, 555, 34, '#ebf3fa', 800);
-  cell(ctx, 72, 723, 'Precio de entrada', price(snapshot.entry), 448);
-  cell(ctx, 544, 723, snapshot.status === 'ABIERTA' ? 'Precio observado' : 'Precio de salida', price(snapshot.price), 448, accent);
-  cell(ctx, 72, 848, 'Tipo de cuenta', snapshot.mode, 448);
-  cell(ctx, 544, 848, snapshot.status === 'ABIERTA' ? 'Estado' : 'Motivo de cierre', snapshot.status === 'ABIERTA' ? 'OPERACIÓN ACTIVA' : (snapshot.reason || '—'), 448);
-  ctx.strokeStyle = 'rgba(130,170,200,.20)'; ctx.beginPath(); ctx.moveTo(72, 984); ctx.lineTo(1000, 984); ctx.stroke();
+  const rows = [
+    ['PRECIO DE ENTRADA', price(snapshot.entry), 66, 865],
+    [snapshot.status === 'ABIERTA' ? 'PRECIO OBSERVADO' : 'PRECIO DE SALIDA',
+     price(snapshot.price), 555, 865],
+    ['DIRECCIÓN', snapshot.side, 66, 972],
+    ['ESTADO / CIERRE', snapshot.status === 'ABIERTA' ? 'ABIERTA' : snapshot.reason || '—',
+     555, 972],
+  ];
+  for (const [label, val, x, y] of rows) {
+    drawText(ctx, label, x, y, 20, '#ffe7a7', 800, 440);
+    drawText(ctx, val, x, y + 42, 32, white, 850, 440);
+  }
   if (referral) {
-    label(ctx, 'ÚNETE A TRADING X HIPER PRO', 76, 1030, 25, '#f2fbff', 800);
-    label(ctx, `Código de referido: ${referral.code}`, 76, 1071, 23, '#93b9ce', 650);
-    ctx.font = '650 19px Inter, system-ui, sans-serif';
-    label(ctx, fitText(ctx, referral.url, 628), 76, 1112, 19, '#79e7c9', 650);
-    label(ctx, 'Escanea el QR para registrarte', 76, 1154, 19, '#9fb0c5', 600);
-    drawQrCode(ctx, referral.url, 780, 991, 195);
+    drawText(ctx, 'CÓDIGO DE REFERIDO', 66, 1098, 20, '#ffe7a7', 800);
+    drawText(ctx, referral.code, 66, 1137, 31, white, 850, 575);
+    // QR is functional, not a boxed trading-data tile.
+    drawQrCode(ctx, referral.url, 862, 1039, 144);
   } else {
-    label(ctx, 'TRADING X HIPER PRO', 75, 1080, 31, '#eef7ff', 800);
-    label(ctx, 'Enlace personal de referido no disponible', 75, 1123, 20, '#8ea5bc', 600);
+    drawText(ctx, 'AUTOMATED TRADING SYSTEM · 24/7', 66, 1137, 29, white, 850);
   }
-  label(ctx, 'DEMO = CAPITAL SIMULADO  ·  LOS RESULTADOS NO GARANTIZAN BENEFICIOS', 75, 1216, 16, '#839ab2', 600);
+  drawText(ctx, snapshot.mode === 'DEMO'
+    ? 'CAPITAL SIMULADO · LOS RESULTADOS NO GARANTIZAN BENEFICIOS'
+    : 'TRADING CON RIESGO · LOS RESULTADOS NO GARANTIZAN BENEFICIOS',
+    65, 1230, 18, '#f4e9d5', 650, 950);
   return canvas;
 }
 
@@ -195,9 +208,9 @@ export async function openShare(kind, raw, referrals = null) {
   const qrOption = panel.querySelector('[data-option="showRoe"]');
   const pnlOption = panel.querySelector('[data-option="showPnl"]');
   const buttons = Array.from(panel.querySelectorAll('.trade-share-actions button'));
-  const logo = await loadLogo();
+  const artwork = await loadArtwork();
   if (!dialog.isConnected) return;
-  const redraw = () => drawCard(canvas, snapshot, referral, { showRoe: qrOption.checked, showPnl: pnlOption.checked }, logo);
+  const redraw = () => drawCard(canvas, snapshot, referral, { showRoe: qrOption.checked, showPnl: pnlOption.checked }, artwork);
   try { await redraw(); } catch (e) { note.textContent = e.message; }
   [qrOption, pnlOption].forEach(el => el.addEventListener('change', () => { redraw().catch((e) => { note.textContent = e.message; }); }));
   const fileName = `TradingX-${snapshot.mode}-${snapshot.symbol.replace(/[^A-Z0-9-]/gi, '-')}-${snapshot.status}.png`;

@@ -218,3 +218,23 @@ body{font-size:15px;line-height:1.55;background:radial-gradient(circle at 95% -6
 }
 /* Los botones restringidos conservan la condición hidden también dentro del menú móvil. */
 .mobile-more-menu .tab.hidden{display:none!important}
+
+/* Control simplificado, conservando el diagnóstico íntegro a demanda. */
+.control-checklist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+.control-checkitem{display:flex;gap:12px;align-items:center;min-height:65px;padding:12px;border:1px solid var(--line);border-radius:14px;background:#0a1b2a}
+.control-checkitem .check-ok,.control-checkitem .check-pending{display:grid;place-items:center;flex:0 0 32px;height:32px;border-radius:50%;font-size:18px;font-weight:800}
+.control-checkitem .check-ok{color:#02261e;background:#20dfa9}
+.control-checkitem .check-pending{color:#271b02;background:#f5c976}
+.control-checkitem strong{display:block;font-size:15px}
+.control-checkitem span:not(.check-ok):not(.check-pending){display:block;color:var(--muted);font-size:12px}
+.readiness-technical-details{margin-top:15px;border-top:1px solid var(--line);padding-top:11px}
+.readiness-technical-details summary{font-size:13px;color:#83dedc;font-weight:700;cursor:pointer}
+.readiness-technical-details pre{font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);max-height:370px;overflow:auto}
+.control-diagnostics{margin:0;border:0;background:transparent}
+.control-diagnostics>summary{border:1px solid var(--line);background:#112737;border-radius:13px}
+.control-diagnostics[open]>summary{margin-bottom:15px}
+@media(max-width:860px){
+ .panel[data-panel="control"] .control-grid>.control-card:nth-child(2){order:-2}
+ .panel[data-panel="control"] .control-grid>.control-card:first-child{order:-1}
+ .control-checklist{grid-template-columns:1fr}
+}

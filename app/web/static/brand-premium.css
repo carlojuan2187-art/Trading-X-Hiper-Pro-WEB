@@ -238,3 +238,73 @@ body{font-size:15px;line-height:1.55;background:radial-gradient(circle at 95% -6
  .panel[data-panel="control"] .control-grid>.control-card:first-child{order:-1}
  .control-checklist{grid-template-columns:1fr}
 }
+
+/* Premium UI v1 · módulos de operaciones, planes, sistema y administración. */
+.panel[data-panel="operations"] .operations-grid,
+.panel[data-panel="billing"] .dashboard-grid,
+.panel[data-panel="admin"] .dashboard-grid,
+.panel[data-panel="system"] .dashboard-grid { gap:17px }
+.panel[data-panel="operations"] .panel-head,
+.panel[data-panel="billing"] .panel-head,
+.panel[data-panel="admin"] .panel-head,
+.panel[data-panel="system"] .panel-head{margin-bottom:16px}
+.panel[data-panel="operations"] .list-stack,
+.panel[data-panel="billing"] .list-stack{gap:9px}
+.list-item,.event-summary,.readiness-item,.admin-history-item,.admin-plan-card,.admin-ops-card {
+ border:1px solid rgba(104,158,180,.18);
+ border-radius:14px;
+ background:linear-gradient(145deg,rgba(10,29,43,.9),rgba(7,21,32,.82));
+ padding:14px;
+}
+.list-item-title,.admin-history-title,.activity-title{font-size:15px;line-height:1.35}
+.list-item-meta,.admin-history-meta,.admin-history-message,.admin-history-reason,
+.activity-copy,.activity-detail,.activity-time{font-size:13px;color:#a5bccc;line-height:1.55}
+.list-item-grid{gap:9px}
+.list-item-grid>div{padding:11px;border:1px solid rgba(104,158,180,.15);background:rgba(15,39,54,.5);border-radius:11px}
+.list-item-grid strong{font-size:15px;overflow-wrap:anywhere}
+.readiness-item{grid-template-columns:9px minmax(0,1fr) auto;gap:12px;min-height:69px}
+.readiness-copy strong{font-size:15px}
+.readiness-copy span{font-size:13px;line-height:1.45}
+.performance-mini{padding-top:13px}
+.performance-mini strong{font-size:16px}
+.terms-box{padding:16px;background:#0b1f2e;border:1px solid var(--line);border-radius:14px}
+.terms-box strong{font-size:15px}
+.terms-box p{font-size:13px;color:var(--muted)}
+.admin-user-detail{gap:16px}
+.admin-user-head h3{font-size:21px}
+.admin-subcopy,.admin-plan-preview,.preview-label{font-size:13px;color:var(--muted);line-height:1.5}
+.preview-item{border:1px solid var(--line);padding:12px;border-radius:12px}
+.preview-item strong{font-size:16px}
+.admin-action-grid{gap:10px}
+.admin-history-list{gap:12px}
+.admin-history-item{padding:15px}
+.demo-history-row{padding:16px 8px}
+.demo-history-row strong{font-size:16px}
+.demo-history-row small{font-size:13px}
+.demo-history-actions .trade-share-trigger{min-height:44px;margin:0;font-size:13px}
+.trade-share-trigger{min-height:44px;font-size:14px;border-radius:11px}
+.info-banner{padding:14px 15px;border-radius:13px}
+.panel[data-panel="billing"] .success-button,
+.panel[data-panel="control"] .success-button{background:#0f795e;border-color:rgba(34,226,171,.35);color:#eafff9}
+.panel[data-panel="control"] .danger-button,
+.admin-danger-action{border-color:rgba(255,101,131,.44);background:rgba(120,33,51,.18);color:#ffcbd3}
+@media(max-width:860px){
+ .panel[data-panel="billing"] .dashboard-grid,
+ .panel[data-panel="admin"] .dashboard-grid,
+ .panel[data-panel="system"] .dashboard-grid,
+ .panel[data-panel="operations"] .operations-grid{grid-template-columns:minmax(0,1fr)}
+ .list-item-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .admin-action-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .readiness-item .status-pill{max-width:120px;white-space:normal;text-align:center}
+}
+@media(max-width:560px){
+ .panel[data-panel="operations"] .panel-head h3,
+ .panel[data-panel="admin"] .panel-head h3{font-size:19px}
+ .list-item{padding:13px}
+ .list-item-grid strong{font-size:14px}
+ .admin-action-grid{grid-template-columns:minmax(0,1fr)}
+ .terms-box{flex-direction:column;align-items:stretch}
+ .terms-box>button{width:100%}
+ .demo-history-row{align-items:flex-start}
+ .demo-history-actions{flex-shrink:0;align-items:flex-end}
+}

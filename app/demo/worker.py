@@ -428,7 +428,7 @@ async def async_main() -> None:
         raise SystemExit('DEMO_WORKER_MODE=true requerido en servicio worker dedicado')
     ledger.COLLECTION.create_index('enabled')
     ledger.COLLECTION.create_index('position.symbol')
-    from app.strategies.breakout_reset import DEMO_STRATEGY_EXPERIMENTAL
+    from app.strategies.breakout_reset import DEMO_STRATEGY_EXPERIMENTAL, DEMO_H1_EARLY_REVERSAL_ENABLED
     from app.config import SCAN_INTERVAL, SCANNER_MIN_TOP_BOOK_NOTIONAL
     from app.market_scanner import _DEMO_TOP_BOOK_MIN_NOTIONAL
     from app.demo.settings import DEMO_BREAK_EVEN_ENABLED, DEMO_BREAK_EVEN_TRIGGER_R
@@ -440,6 +440,8 @@ async def async_main() -> None:
                 DEMO_BREAK_EVEN_ENABLED, DEMO_BREAK_EVEN_TRIGGER_R,
                 DEMO_LIQUIDITY_MAX_SWEEP_AGE_BARS, SWEEP_MAX_AGE_BARS)
     logger.info('DEMO WebSocket event-driven; no LIVE execution; private keys never loaded')
+    logger.info('DEMO_H1_PROFILE early_reversal=%s m15_unchanged=true m5_unchanged=true',
+                DEMO_H1_EARLY_REVERSAL_ENABLED)
     logger.info('DEMO_PARITY_PROFILE scanner_s=%.1f live_scanner_s=%s '
                 'scanner_book_usdc=%.2f live_scanner_book_usdc=%.2f '
                 'strategy_profile=%s book_model=live_directional_impact_band',

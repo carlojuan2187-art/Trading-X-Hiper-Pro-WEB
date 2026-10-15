@@ -400,6 +400,69 @@ class DemoResetTrialTests(unittest.TestCase):
 
 
 
+
+class DemoH1EarlyReversalIsolationTests(unittest.TestCase):
+    """An H1-only opt-in in the DEMO worker must leave LIVE/M15/M5 untouched."""
+
+    @staticmethod
+    def h1_context(direction='long'):
+        n = 12
+        sign = 1 if direction == 'long' else -1
+        closes = [100.0 + sign * .5] * n
+        closes[-2], closes[-1] = 100.0 + sign * 1.5, 100.0 + sign * 2.0
+        ema20 = [100.0] * (n - 7) + [
+            100 + sign * x for x in (0.0, .1, .2, .3, .5, .7, .9)]
+        return dict(c=closes, ema20=ema20, ema50=[100 + sign * 1.0] * n,
+                    ema200=[100 + sign * 3.0] * n, adx=22)
+
+    def test_h1_demo_early_reversal_requires_two_closed_bars_and_fast_slope(self):
+        for side in ('long', 'short'):
+            tf = self.h1_context(side)
+            self.assertEqual(mtf._h1_bias(tf)[0], 'none')
+            direction, diag = mtf._demo_h1_early_reversal(tf, {'h1_mode': 'strict'})
+            self.assertEqual(direction, side, diag)
+            self.assertEqual(diag['h1_mode'], 'demo_early_reversal')
+            tf['adx'] = 12
+            self.assertEqual(mtf._demo_h1_early_reversal(tf, {})[0], 'none')
+            tf['adx'] = 22
+            tf['c'][-2] = 100.0
+            self.assertEqual(mtf._demo_h1_early_reversal(tf, {})[0], 'none')
+            tf = self.h1_context(side)
+            tf['ema20'][-1] = tf['ema20'][-2] - (0.1 if side == 'long' else -0.1)
+            self.assertEqual(mtf._demo_h1_early_reversal(tf, {})[0], 'none')
+
+    def test_opt_in_only_demo_and_m15_remains_strict(self):
+        from copy import deepcopy
+        ctx = StrategyContracts().context()
+        base = ctx['timeframes']['5m']
+        h1 = deepcopy(base)
+        h1.update(self.h1_context())
+        h1['status'] = 'OK'
+        def resolve(symbol, interval, *args, **kwargs):
+            return h1 if interval == '1h' else base
+        trial = dict(ctx, _execution_mode='demo')
+        with patch.object(mtf, '_resolve_tf_snapshot', side_effect=resolve), \
+             patch.object(mtf, 'DEMO_H1_EARLY_REVERSAL_ENABLED', True), \
+             patch.object(mtf, 'DEMO_STRATEGY_EXPERIMENTAL', False):
+            self.assertEqual(mtf._evaluate_market_context(ctx)['reason'], 'NO_H1_BIAS')
+            with patch.object(mtf, '_m15_confirmation', wraps=mtf._m15_confirmation) as m15:
+                outcome = mtf._evaluate_market_context(trial)
+            self.assertTrue(outcome.get('signal'), outcome)
+            self.assertEqual(outcome['h1_mode'], 'demo_early_reversal')
+            self.assertEqual(outcome['m15_mode'], 'strict')
+            self.assertFalse(m15.call_args.kwargs['demo_trial'])
+            self.assertEqual(mtf._evaluate_market_context(ctx)['reason'], 'NO_H1_BIAS')
+        with patch.object(mtf, '_resolve_tf_snapshot', side_effect=resolve), \
+             patch.object(mtf, 'DEMO_H1_EARLY_REVERSAL_ENABLED', False):
+            self.assertEqual(mtf._evaluate_market_context(trial)['reason'], 'NO_H1_BIAS')
+
+    def test_missing_or_invalid_h1_data_cannot_unlock(self):
+        self.assertEqual(mtf._demo_h1_early_reversal({}, {})[0], 'none')
+        tf = self.h1_context()
+        tf['c'][-1] = float('nan')
+        self.assertEqual(mtf._demo_h1_early_reversal(tf, {})[0], 'none')
+
+
 class DemoBiasExperimentTests(unittest.TestCase):
     """La flexibilización alcanza sólo DEMO, sin alterar la ruta LIVE."""
 

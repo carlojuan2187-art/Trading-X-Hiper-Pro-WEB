@@ -39,6 +39,8 @@ MTF_PENDING_SETUP_ENABLED = env_bool("MTF_PENDING_SETUP_ENABLED", True)
 # LAB isolation: identical strategy decisions to LIVE by default. These
 # experimental parameters are applied only to DEMO after explicit opt-in.
 DEMO_STRATEGY_EXPERIMENTAL = env_bool("DEMO_STRATEGY_EXPERIMENTAL", False)
+# H1-only DEMO experiment: does not opt into M15 or M5 trial rules.
+DEMO_H1_EARLY_REVERSAL_ENABLED = env_bool("DEMO_H1_EARLY_REVERSAL_ENABLED", False)
 DEMO_MTF_RESET_TOUCH_TOL_ATR = env_float("DEMO_MTF_RESET_TOUCH_TOL_ATR", 0.58, minimum=0.0)
 DEMO_MTF_CONTINUATION_CONFIRM_TOL_ATR = env_float(
     "DEMO_MTF_CONTINUATION_CONFIRM_TOL_ATR", 0.32, minimum=0.0)
@@ -454,6 +456,48 @@ def _h1_bias(tf_ctx: Dict[str, Any], *, demo_trial: bool = False) -> Tuple[str, 
     return direction, diag
 
 
+def _demo_h1_early_reversal(tf_ctx: Dict[str, Any], diag: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """DEMO only: accept an early 1H price recovery, never modify LIVE or M15.
+
+    Required: two closed H1 closes beyond EMA20, current close also beyond
+    EMA50, a rising/falling EMA20 over both 1 and 6 closed H1 candles,
+    and ADX >= 14. EMA50/EMA200 stacking is deliberately observational.
+    """
+    out = dict(diag)
+    c, e20, e50 = ((tf_ctx.get(key) or []) for key in ("c", "ema20", "ema50"))
+    if min(len(c), len(e20), len(e50)) < EMA_SLOPE_LOOKBACK + 1:
+        out["demo_h1_reject"] = "INSUFFICIENT_CLOSED_BARS"
+        return "none", out
+    try:
+        closes = [float(c[i]) for i in (-2, -1)]
+        fast = [float(e20[i]) for i in (-2, -1, -1 - EMA_SLOPE_LOOKBACK)]
+        mid = float(e50[-1])
+        adx = float(tf_ctx.get("adx") or 0.0)
+    except (ValueError, TypeError, OverflowError, IndexError):
+        out["demo_h1_reject"] = "INVALID_INDICATORS"
+        return "none", out
+    if not all(math.isfinite(x) and x > 0 for x in closes + fast + [mid, adx]):
+        out["demo_h1_reject"] = "INVALID_INDICATORS"
+        return "none", out
+    if adx < max(H1_ADX_MIN, 14.0):
+        out["demo_h1_reject"] = "ADX_TOO_LOW"
+        return "none", out
+
+    previous_close, latest_close = closes
+    previous_fast, latest_fast, six_bar_fast = fast
+    long_ok = (previous_close > previous_fast and latest_close > max(latest_fast, mid)
+               and latest_fast > previous_fast and latest_fast > six_bar_fast)
+    short_ok = (previous_close < previous_fast and latest_close < min(latest_fast, mid)
+                and latest_fast < previous_fast and latest_fast < six_bar_fast)
+    if long_ok == short_ok:
+        out["demo_h1_reject"] = "NO_CONFIRMED_EARLY_REVERSAL"
+        return "none", out
+    out["h1_mode"] = "demo_early_reversal"
+    out["demo_h1_early_reversal_bars"] = 2
+    out["demo_h1_ema200_bypassed"] = True
+    return ("long" if long_ok else "short"), out
+
+
 def _m15_confirmation(tf_ctx: Dict[str, Any], direction: str, *, demo_trial: bool = False) -> Tuple[str, Dict[str, Any]]:
     bias, diag = _bias_from_tf(tf_ctx, adx_min=M15_ADX_MIN,
                              require_slow_stack=MTF_M15_REQUIRE_EMA200)
@@ -778,6 +822,11 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> dict:
 
         demo_trial = (market_context.get("_execution_mode") == "demo" and DEMO_STRATEGY_EXPERIMENTAL)
         bias1h, diag1h = _h1_bias(tf1h, demo_trial=demo_trial)
+        # Isolated H1-only comparison: DEMO can recover early H1 direction
+        # without weakening M15 confirmation or M5 setup/SL/TP rules.
+        if (bias1h == "none" and market_context.get("_execution_mode") == "demo"
+                and DEMO_H1_EARLY_REVERSAL_ENABLED):
+            bias1h, diag1h = _demo_h1_early_reversal(tf1h, diag1h)
         bias15, diag15 = _m15_confirmation(tf15, bias1h, demo_trial=demo_trial)
         if bias1h == "none":
             return {"signal": False, "reason": "NO_H1_BIAS", "coin": coin, "diag": diag1h}

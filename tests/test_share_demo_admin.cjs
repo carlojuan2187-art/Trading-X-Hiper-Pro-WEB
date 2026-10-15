@@ -15,6 +15,7 @@ assert.doesNotMatch(share,/function cell\(/);
 assert.doesNotMatch(share,/cell\(ctx,/);
 assert.match(share,/drawText\(ctx, val,/);
 assert.match(main,/resetAllDemoStatsForAdmin/);
+assert.doesNotMatch(main,/await loadAdmin\(/, 'non-existent loadAdmin helper');
 assert.match(main,/phrase !== 'REINICIAR DEMO'/);
 assert.match(page,/id="adminResetDemoButton"/);
 assert.match(admin,/Depends\(require_admin_session\)/);

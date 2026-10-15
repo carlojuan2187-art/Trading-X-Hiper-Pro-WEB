@@ -1557,7 +1557,7 @@ async function resetAllDemoStatsForAdmin() {
     elements.adminResetDemoStatus.textContent =
       `Reinicio DEMO completado: ${result.reset_accounts} cuenta(s). Entradas pausadas; reactívalas manualmente.`;
     await loadDemo();
-    await loadAdmin();
+    renderAdmin(await apiFetch('/api/v1/admin/overview'));
   } catch (error) {
     elements.adminResetDemoStatus.textContent =
       error.message || 'No se pudo reiniciar DEMO. Verifica el estado de las posiciones.';

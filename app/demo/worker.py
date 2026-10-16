@@ -133,6 +133,31 @@ class DemoMarketRunner:
         self.next_scan = time.monotonic()  # scanner es candle-driven, no polling de precios
         self.next_lease = time.monotonic()
 
+    @staticmethod
+    def trace_trade(event: str, uid: int, position: dict | None, **extra) -> None:
+        """Structured, per-trade Railway trace. Never log credentials or user secrets."""
+        p = position or {}
+        fields = (
+            'id', 'symbol', 'direction', 'strategy_id', 'regime_id',
+            'router_decision', 'signal_score', 'scanner_score',
+            'signal_reference_price', 'entry_price', 'quantity',
+            'stop_price', 'initial_stop_price', 'target_price', 'rr',
+            'margin_usdc', 'notional_usdc', 'leverage', 'opened_at',
+            'mark_price', 'unrealized_pnl_usdc', 'demo_be_enabled',
+            'demo_be_armed', 'demo_be_stop_price', 'demo_be_trigger_r',
+            'audit_quotes', 'audit_mfe_pct', 'audit_mae_pct',
+            'audit_max_quote_gap_seconds', 'audit_quote_gaps_over_10s',
+            'close_reason', 'closed_at', 'exit_price', 'pnl_gross_usdc',
+            'pnl_net_usdc', 'entry_fee_usdc', 'exit_fee_usdc',
+            'audit_exit_vs_stop_pct',
+        )
+        payload = {k: p.get(k) for k in fields if k in p}
+        payload.update(extra)
+        payload['event_at'] = datetime.now(timezone.utc).isoformat()
+        logger.info('DEMO_TRADE_TRACE event=%s user=%s trade_id=%s symbol=%s data=%s',
+                    event, uid, p.get('id', ''), p.get('symbol', ''),
+                    json.dumps(payload, sort_keys=True, default=str))
+
     def protected_positions(self, symbol: str, bid: float, ask: float) -> tuple[int, int]:
         marked = closed = 0
         coin = _ws_coin(symbol)
@@ -160,6 +185,22 @@ class DemoMarketRunner:
                 if not updated:
                     continue
                 measured_position = updated.get('position')
+                # Every received, valid WS quote is traceable to a trade id.
+                # Log BEFORE persistence, including the quote that triggers SL/TP.
+                traced = measured_position or updated['history'][-1]
+                self.trace_trade('QUOTE' if measured_position else 'TRIGGER',
+                                 int(account['_id']), traced,
+                                 ws_coin=coin, bid=bid, ask=ask,
+                                 spread_bps=round((ask / bid - 1) * 10000, 4),
+                                 executable_side='bid' if traced.get('direction') == 'long' else 'ask',
+                                 quote_sequence=int(traced.get('audit_quotes') or 0),
+                                 quote_gap_seconds=round(
+                                     max(0.0, (datetime.now(timezone.utc) -
+                                         datetime.fromisoformat(str(
+                                             (account['position'].get('audit_last_quote_at')
+                                              or account['position'].get('opened_at'))))).total_seconds()), 3)
+                                     if (account['position'].get('audit_last_quote_at')
+                                         or account['position'].get('opened_at')) else None)
                 if not measured_position:
                     # Closed history includes unsaved in-memory extremes and
                     # latest gap counters from EVERY observed WS quote.
@@ -185,6 +226,7 @@ class DemoMarketRunner:
                                         'demo_be_stop_price', 'demo_be_armed_at',
                                     )
                                 }, sort_keys=True, default=str))
+                    self.trace_trade('CLOSED', int(account['_id']), trade, bid=bid, ask=ask)
                     closed += 1
                 else:
                     # Keep exact WS extrema between Mongo writes. Periodic
@@ -246,6 +288,16 @@ class DemoMarketRunner:
                     saved = ledger.save(current, updated)
                     opened += 1
                     pos = saved['position']
+                    self.trace_trade('OPENED', uid, pos, bid=bid, ask=ask,
+                                     selected_signal={
+                                         k: selected.get('signal', {}).get(k)
+                                         for k in ('direction', 'score', 'strength', 'strategy_id',
+                                                   'signal_reference_price', 'stop_price', 'target_price',
+                                                   'sweep_depth_atr', 'bars_since_sweep', 'rr_estimate',
+                                                   'adx5', 'atr_pct')
+                                     },
+                                     shortlist_rank=selected.get('shortlist_rank'),
+                                     shortlist_size=selected.get('shortlist_size'))
                     logger.info('DEMO_TRADE_AUDIT_OPEN user=%s data=%s', uid, json.dumps({
                         k: pos.get(k) for k in (
                             'id', 'symbol', 'direction', 'strategy_id',
@@ -260,6 +312,10 @@ class DemoMarketRunner:
                         )
                     }, sort_keys=True, default=str))
                 else:
+                    logger.info('DEMO_ENTRY_TRACE event=REJECTED user=%s symbol=%s bid=%.10f ask=%.10f signal=%s diag=%s',
+                                uid, coin, bid, ask,
+                                json.dumps(selected.get('signal') or {}, sort_keys=True, default=str),
+                                json.dumps(reason, sort_keys=True, default=str))
                     logger.info('DEMO final entry rejected user=%s symbol=%s diag=%s',
                                 uid, coin, json.dumps(reason, sort_keys=True, default=str))
                     # Only a rejected trade-specific execution check can fall
@@ -312,6 +368,18 @@ class DemoMarketRunner:
                 selected = engine._select_best_signal_from_scanner_shortlist(
                     uid, set(), execution_mode='demo', demo_fallback_limit=3)
                 if selected and selected.get('symbol'):
+                    logger.info('DEMO_SIGNAL_TRACE user=%s symbol=%s data=%s', uid,
+                                selected['symbol'], json.dumps({
+                                    'event_at': datetime.now(timezone.utc).isoformat(),
+                                    'symbol': selected.get('symbol'),
+                                    'direction': selected.get('direction'),
+                                    'regime_id': selected.get('regime_id'),
+                                    'router_decision': selected.get('router_decision'),
+                                    'shortlist_rank': selected.get('shortlist_rank'),
+                                    'shortlist_size': selected.get('shortlist_size'),
+                                    'scanner': selected.get('scanner'),
+                                    'signal': selected.get('signal'),
+                                }, sort_keys=True, default=str))
                     pending[uid] = (selected, time.monotonic())
             except Exception:
                 logger.exception('DEMO scanner/router error user=%s', uid)

@@ -4577,6 +4577,39 @@ def _select_best_signal_from_scanner_shortlist(
                 }
                 log(f"REJECTION_DIAGNOSTICS symbol={symbol} "
                     f"diag={json.dumps(rejection_diag, sort_keys=True)}")
+            if execution_mode == "demo" and reason in {"NO_H1_BIAS", "NO_M15_BIAS"} and not signal.get("signal_cache_hit"):
+                # SHADOW ONLY: evaluate a softer directional bias without changing
+                # the signal, routing, cached rejection, or order execution.
+                try:
+                    d = signal.get("diag") or {}
+                    close = float(d.get("close") or 0)
+                    ema20 = float(d.get("ema20") or 0)
+                    ema50 = float(d.get("ema50") or 0)
+                    adx = float(d.get("adx") or 0)
+                    slope20 = float(d.get("slope20") or 0)
+                    slope50 = float(d.get("slope50") or 0)
+                    valid = close > 0 and ema20 > 0 and ema50 > 0
+                    # Allow a small pullback through EMA20 (0.35%) but require
+                    # EMA20/EMA50 directional alignment and minimum ADX.
+                    relaxed_long = bool(valid and adx >= 12 and
+                                        close >= ema20 * 0.9965 and
+                                        ema20 >= ema50 * 0.997 and
+                                        slope20 >= -0.0005 and slope50 >= -0.0005)
+                    relaxed_short = bool(valid and adx >= 12 and
+                                         close <= ema20 * 1.0035 and
+                                         ema20 <= ema50 * 1.003 and
+                                         slope20 <= 0.0005 and slope50 <= 0.0005)
+                    log("DEMO_SHADOW_BIAS " + json.dumps({
+                        "symbol": symbol, "filter": "H1" if reason == "NO_H1_BIAS" else "M15",
+                        "original": "REJECTED", "shadow_long": relaxed_long,
+                        "shadow_short": relaxed_short, "valid": valid,
+                        "close": close, "ema20": ema20, "ema50": ema50,
+                        "adx": adx, "slope20": slope20, "slope50": slope50,
+                        "candle_close_t": ((symbol_ctx.get("timeframes") or {}).get(TF_5M) or {}).get("last_close_t"),
+                        "mode": "OBSERVE_ONLY",
+                    }, sort_keys=True))
+                except (TypeError, ValueError, OverflowError) as shadow_exc:
+                    log(f"DEMO_SHADOW_BIAS_ERROR symbol={symbol} error={shadow_exc}")
             if reason in {"NO_H1_BIAS", "NO_M15_BIAS"} and not signal.get("signal_cache_hit"):
                 log(f"BIAS_DIAGNOSTICS symbol={symbol} reason={reason} "
                     f"diag={json.dumps(signal.get('diag') or {}, sort_keys=True)}")

@@ -312,6 +312,26 @@ class DemoMarketRunner:
                         )
                     }, sort_keys=True, default=str))
                 else:
+                    # Shadow RR evaluation: informational only, never retries or
+                    # bypasses the real entry gate. Log only measured entry RR.
+                    plan = reason.get('plan') if isinstance(reason, dict) else None
+                    if isinstance(plan, dict) and plan.get('reason') == 'RR_TOO_LOW_AFTER_ENTRY':
+                        try:
+                            measured_rr = float(plan.get('rr') or 0.0)
+                            logger.info('DEMO_SHADOW_RR user=%s symbol=%s data=%s',
+                                        uid, coin, json.dumps({
+                                            'mode': 'OBSERVE_ONLY',
+                                            'original': 'REJECTED',
+                                            'entry_rr': measured_rr,
+                                            'shadow_min_rr_1_0': measured_rr >= 1.0,
+                                            'shadow_min_rr_1_1': measured_rr >= 1.1,
+                                            'entry_price': plan.get('entry_price'),
+                                            'stop_price': plan.get('stop_price'),
+                                            'target_price': plan.get('target_price'),
+                                            'reason': plan.get('reason'),
+                                        }, sort_keys=True))
+                        except (TypeError, ValueError, OverflowError):
+                            logger.exception('DEMO_SHADOW_RR_INVALID user=%s symbol=%s', uid, coin)
                     logger.info('DEMO_ENTRY_TRACE event=REJECTED user=%s symbol=%s bid=%.10f ask=%.10f signal=%s diag=%s',
                                 uid, coin, bid, ask,
                                 json.dumps(selected.get('signal') or {}, sort_keys=True, default=str),

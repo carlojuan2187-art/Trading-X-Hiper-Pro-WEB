@@ -4,7 +4,7 @@ import time
 from app.settings_utils import env_float, env_int, env_bool
 from app.symbol_policy import ALLOWED_SYMBOLS, BLOCKED_MEME_KEYWORDS
 from app.trading_quality import meets_min_rr
-from app.pending_setup import find_pending_reset
+from app.pending_setup import find_pending_reset, find_m5_continuation
 from typing import Dict, Any, List, Optional, Tuple
 
 from app.strategies.base import BaseStrategy
@@ -43,6 +43,9 @@ DEMO_STRATEGY_EXPERIMENTAL = env_bool("DEMO_STRATEGY_EXPERIMENTAL", False)
 DEMO_H1_EARLY_REVERSAL_ENABLED = env_bool("DEMO_H1_EARLY_REVERSAL_ENABLED", False)
 # Independent DEMO-only M15 early trend confirmation; LIVE remains strict.
 DEMO_M15_EARLY_CONFIRMATION_ENABLED = env_bool("DEMO_M15_EARLY_CONFIRMATION_ENABLED", False)
+# DEMO only: second 5m entry path after a failed conventional pending reset.
+# Does not relax H1/M15, reuse consumed resets, or change LIVE.
+DEMO_M5_EXPANDED_ENTRIES_ENABLED = env_bool("DEMO_M5_EXPANDED_ENTRIES_ENABLED", True)
 DEMO_MTF_RESET_TOUCH_TOL_ATR = env_float("DEMO_MTF_RESET_TOUCH_TOL_ATR", 0.58, minimum=0.0)
 DEMO_MTF_CONTINUATION_CONFIRM_TOL_ATR = env_float(
     "DEMO_MTF_CONTINUATION_CONFIRM_TOL_ATR", 0.32, minimum=0.0)
@@ -554,6 +557,7 @@ def _m15_confirmation(tf_ctx: Dict[str, Any], direction: str, *, demo_trial: boo
 def _detect_simple_mtf_trigger(
     *,
     demo_trial: bool = False,
+    demo_m5_expanded: bool = False,
     direction: str,
     o: List[float],
     h: List[float],
@@ -566,14 +570,28 @@ def _detect_simple_mtf_trigger(
     atr: float,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     if MTF_PENDING_SETUP_ENABLED:
-        return find_pending_reset(direction=direction, o=o, h=h, l=l, c=c,
+        primary_ok, primary_reason, primary_diag = find_pending_reset(
+            direction=direction, o=o, h=h, l=l, c=c,
             ema20=ema20, ema50=ema50, atr=atr, max_age=MTF_SETUP_MAX_AGE_BARS,
-            # DEMO: narrow trial tolerances for legitimate near-EMA20 resets
-            # and closed-bar confirmations. Prior confirmed setups cannot be reused.
+            # Original LIVE/DEMO pending-reset lifecycle is preserved.
             touch_atr=(DEMO_MTF_RESET_TOUCH_TOL_ATR if demo_trial else RESET_TOUCH_TOL_ATR),
             break_atr=RESET_BREAK_TOL_ATR,
             confirm_atr=(DEMO_MTF_CONTINUATION_CONFIRM_TOL_ATR if demo_trial else CONTINUATION_CONFIRM_TOL_ATR),
             max_extension=TRIGGER_MAX_EMA20_EXTENSION_ATR)
+        # Only fresh alternative patterns; NEVER rescue an already-consumed
+        # or overextended setup, or a LIVE rejection.
+        if (not primary_ok and demo_m5_expanded
+                and primary_reason in {'NO_VALID_PENDING_RESET', 'PENDING_CONTINUATION_CONFIRM'}):
+            alt_ok, alt_reason, alt_diag = find_m5_continuation(
+                direction=direction, o=o, h=h, l=l, c=c, ema20=ema20,
+                atr=atr, max_extension=TRIGGER_MAX_EMA20_EXTENSION_ATR)
+            if alt_ok:
+                alt_diag['primary_m5_reason'] = primary_reason
+                return True, alt_reason, alt_diag
+            primary_diag = dict(primary_diag)
+            primary_diag['demo_m5_alt_reason'] = alt_reason
+            primary_diag['demo_m5_alt_diag'] = alt_diag
+        return primary_ok, primary_reason, primary_diag
     if len(c) < max(EMA_SLOW + 5, 80):
         return False, "NOT_ENOUGH_BARS", {}
 
@@ -844,6 +862,8 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> dict:
         direction = bias1h
         ok_trigger, reason5, diag5 = _detect_simple_mtf_trigger(
             demo_trial=demo_trial,
+            demo_m5_expanded=(market_context.get("_execution_mode") == "demo"
+                              and DEMO_M5_EXPANDED_ENTRIES_ENABLED),
             direction=direction,
             o=o5,
             h=h5,
@@ -987,6 +1007,8 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> dict:
         out = {
             "signal": True,
             "setup_state": diag5.get("setup_state", "LEGACY"),
+            "m5_entry_path": diag5.get("m5_entry_path", "pending_reset"),
+            "m5_atr": float(atr5),
             "bars_since_reset": diag5.get("bars_since_reset"),
             "reset_index": diag5.get("reset_index"),
             "extension_atr": diag5.get("extension_atr"),
@@ -1030,7 +1052,7 @@ def _evaluate_market_context(market_context: Dict[str, Any]) -> dict:
             _log(
                 f"SIGNAL coin={coin} dir={out['direction']} close_5={out['close_5']} t5={out['last_candle_t_5m']} age5s={round(age5,1)} "
                 f"adx5={round(adx5,2)} adx15={out['adx15']} adx1={out['adx1']} atr_pct={out['atr_pct']} score={out['score']} "
-                f"h1_bias={out['h1_bias']} m15_bias={out['m15_bias']} sl_pct={out['sl_price_pct']} "
+                f"h1_bias={out['h1_bias']} m15_bias={out['m15_bias']} m5_path={out['m5_entry_path']} sl_pct={out['sl_price_pct']} "
                 f"tp_fixed={out['tp_activation_price']} tp_rr={out['tp_rr_multiple']:.4f} be_act={out['break_even_activation_price']} "
                 f"be_offset={out['break_even_offset_price']} bucket={out['mgmt_bucket']}"
             )

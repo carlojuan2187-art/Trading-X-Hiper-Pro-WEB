@@ -49,3 +49,75 @@ def find_pending_reset(*, direction, o, h, l, c, ema20, ema50, atr,
         diag['setup_state'] = 'CONFIRMED'
         return True, 'OK', diag
     return False, 'NO_VALID_PENDING_RESET', {'setup_state': 'EXPIRED_OR_INVALIDATED'}
+
+
+def find_m5_continuation(*, direction, o, h, l, c, ema20, atr,
+                         max_extension=0.95):
+    """DEMO alternative to a perfect EMA20 reset: one CLOSED 5m pause/reclaim.
+
+    Only accepts a new directional confirmation on the most recent closed bar.
+    The regular pending-reset lifecycle (including consumed setups) stays intact.
+    This helper does not decide H1/M15 bias, position sizing, RR, or execution.
+    """
+    import math
+
+    arrays = (o, h, l, c, ema20)
+    n = len(c)
+    if (direction not in {'long', 'short'} or n < 5 or atr <= 0
+            or not math.isfinite(atr) or any(len(a) != n for a in arrays)):
+        return False, 'M5_ALT_INVALID_DATA', {}
+    i = n - 1
+    recent = [float(a[k]) for a in arrays for k in (i - 2, i - 1, i)]
+    if not all(math.isfinite(x) for x in recent):
+        return False, 'M5_ALT_INVALID_DATA', {}
+    if any(h[k] < l[k] or c[k] <= 0 or ema20[k] <= 0
+           for k in (i - 2, i - 1, i)):
+        return False, 'M5_ALT_INVALID_DATA', {}
+
+    side = 1 if direction == 'long' else -1
+    extension = abs(c[i] - ema20[i]) / atr
+    diag = {'m5_entry_path': 'none', 'extension_atr': extension,
+            'confirm_index': i, 'setup_state': 'M5_ALT_PENDING'}
+    # No chasing an extended move or accepting a candle against the direction.
+    if extension > max_extension:
+        return False, 'M5_ALT_TOO_EXTENDED', diag
+    if side * (c[i] - ema20[i]) <= 0:
+        return False, 'M5_ALT_WRONG_EMA20_SIDE', diag
+    if side * (ema20[i] - ema20[i - 2]) < -0.03 * atr:
+        return False, 'M5_ALT_EMA20_OPPOSING', diag
+    if side * (c[i] - o[i]) < 0.14 * atr:
+        return False, 'M5_ALT_NO_DIRECTIONAL_BODY', diag
+    candle_range = max(h[i] - l[i], 1e-12)
+    close_location = (c[i] - l[i]) / candle_range
+    if (direction == 'long' and close_location < 0.62) or (
+            direction == 'short' and close_location > 0.38):
+        return False, 'M5_ALT_WEAK_CLOSE', diag
+
+    prev = i - 1
+    prev_range = max(h[prev] - l[prev], 1e-12)
+    counter_or_pause = (
+        side * (c[prev] - o[prev]) <= 0
+        or abs(c[prev] - o[prev]) <= 0.42 * prev_range
+    )
+    ema20_test = (l[prev] <= ema20[prev] + 0.50 * atr if direction == 'long'
+                  else h[prev] >= ema20[prev] - 0.50 * atr)
+    reclaimed = (
+        side * (c[prev] - ema20[prev]) <= 0.08 * atr
+        and side * (c[i] - ema20[i]) >= 0.08 * atr
+    )
+    breakout = (c[i] >= h[prev] - 0.12 * atr if direction == 'long'
+                else c[i] <= l[prev] + 0.12 * atr)
+    diag.update({'pause': bool(counter_or_pause), 'ema20_test': bool(ema20_test),
+                 'reclaimed': bool(reclaimed), 'breakout': bool(breakout),
+                 'close_location': round(close_location, 4)})
+    if not (counter_or_pause or ema20_test or reclaimed):
+        return False, 'M5_ALT_NO_FRESH_PAUSE', diag
+    if not breakout:
+        return False, 'M5_ALT_NO_PRICE_CONFIRM', diag
+
+    path = 'ema20_reclaim' if reclaimed else 'pause_continuation'
+    diag.update({'m5_entry_path': path, 'setup_state': 'M5_ALT_CONFIRMED',
+                 'bars_since_reset': 1, 'reset_index': prev,
+                 'structural_extreme': min(l[prev], l[i]) if direction == 'long'
+                                       else max(h[prev], h[i])})
+    return True, 'OK_M5_ALT', diag

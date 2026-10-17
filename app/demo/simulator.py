@@ -201,6 +201,24 @@ def open_position(account: dict, selected: dict, bid: float, ask: float,
         return reject('PRICE_DRIFT', entry_price=entry,
                       reference_price=signal.get('signal_reference_price'),
                       drift=dict(drift_diag or {}))
+    # DEMO M5 expansion: the extra path must be fresh and executable now.
+    # Strict pending resets and LIVE are unchanged.
+    if str(signal.get('m5_entry_path') or '') in {'ema20_reclaim', 'pause_continuation'}:
+        candle_close_ms = int(signal.get('last_candle_t_5m') or 0)
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        if candle_close_ms <= 0 or now_ms - candle_close_ms > 600_000:
+            return reject('DEMO_M5_ALT_STALE', candle_close_ms=candle_close_ms,
+                          age_ms=now_ms - candle_close_ms)
+        reference = float(signal.get('signal_reference_price') or 0)
+        atr = float(signal.get('m5_atr') or 0)
+        if reference <= 0 or not math.isfinite(atr) or atr <= 0:
+            return reject('DEMO_M5_ALT_MISSING_PRICE_CONTEXT')
+        signed_move_atr = ((entry - reference) if direction == 'long'
+                           else (reference - entry)) / atr
+        if signed_move_atr < -0.35 or signed_move_atr > 0.75:
+            return reject('DEMO_M5_ALT_PRICE_MOVED',
+                          signed_move_atr=round(signed_move_atr, 4),
+                          entry_price=entry, reference_price=reference)
     mgmt = engine._coalesce_management_params(
         signal=signal, entry_strength=float(selected.get('strength') or 0),
         best_score=float(signal.get('score') or 0),

@@ -4688,6 +4688,16 @@ def _select_best_signal_from_scanner_shortlist(
             )
             continue
 
+        # DEMO-only: reject a confirmed directional contradiction for MTF simple.
+        # Neutral/unknown regime bias is not a veto; H1/M15 thresholds stay intact.
+        if execution_mode == "demo" and str(signal.get("strategy_id") or "") == "mtf_simple":
+            regime_ctx = signal.get("regime_context") or {}
+            regime_bias = str(regime_ctx.get("bias") or "").lower() if isinstance(regime_ctx, dict) else ""
+            if regime_bias in ("long", "short") and regime_bias != direction:
+                rejection_counts["DEMO_MTF_REGIME_CONFLICT"] += 1
+                log(f"DEMO_MTF_REGIME_CONFLICT symbol={symbol} direction={direction} regime_bias={regime_bias} action=REJECT")
+                continue
+
         ranked = _candidate_rank_tuple(signal, candidate)
         picked = {
             "symbol": symbol,

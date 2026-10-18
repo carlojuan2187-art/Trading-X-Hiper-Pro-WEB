@@ -4446,10 +4446,12 @@ def _select_best_signal_from_scanner_shortlist(
     limit = _signal_candidate_limit()
     fetch_limit = max(int(limit * SHORTLIST_FETCH_MULTIPLIER), int(limit))
     enforce_demo_book = execution_mode == "demo" and min_top_book_notional > 0
+    # DEMO must consume the EXACT LIVE scanner candidate rules and cache path.
+    # The mode remains "demo" only for accounting, diagnostics and paper fills.
     shortlist = get_ranked_symbols(
         exclude_symbols=exclude_symbols,
         limit=None if enforce_demo_book else fetch_limit,
-        execution_mode=execution_mode,
+        execution_mode="live",
     )
     if enforce_demo_book:
         original_count = len(shortlist)
@@ -4520,10 +4522,12 @@ def _select_best_signal_from_scanner_shortlist(
                 adx_period=ADX_PERIOD,
                 atr_period=ATR_PERIOD,
             )
-            # Modo de evaluación explícito, aislado: sólo DEMO usa la prueba H1/M15.
-            # No modificar el snapshot cacheado del proveedor de mercado.
+            # One strategy decision engine for BOTH modes: same H1/M15/M5,
+            # liquidity age, router, score and risk metadata. DEMO never
+            # executes LIVE orders: only its isolated paper worker uses this
+            # selected signal. Do not mutate the cached market snapshot.
             strategy_ctx = dict(symbol_ctx)
-            strategy_ctx["_execution_mode"] = "demo" if execution_mode == "demo" else "live"
+            strategy_ctx["_execution_mode"] = "live"
             symbol_eval_started_ts = time.time()
             signal = get_entry_signal(symbol, market_context=strategy_ctx, btc_context=btc_context)
             symbol_eval_elapsed_s = time.time() - symbol_eval_started_ts
@@ -4687,16 +4691,6 @@ def _select_best_signal_from_scanner_shortlist(
                 extra={"phase": "shortlist_rejected", "reject_reason": f"BAD_DIRECTION:{direction}"},
             )
             continue
-
-        # DEMO-only: reject a confirmed directional contradiction for MTF simple.
-        # Neutral/unknown regime bias is not a veto; H1/M15 thresholds stay intact.
-        if execution_mode == "demo" and str(signal.get("strategy_id") or "") == "mtf_simple":
-            regime_ctx = signal.get("regime_context") or {}
-            regime_bias = str(regime_ctx.get("bias") or "").lower() if isinstance(regime_ctx, dict) else ""
-            if regime_bias in ("long", "short") and regime_bias != direction:
-                rejection_counts["DEMO_MTF_REGIME_CONFLICT"] += 1
-                log(f"DEMO_MTF_REGIME_CONFLICT symbol={symbol} direction={direction} regime_bias={regime_bias} action=REJECT")
-                continue
 
         ranked = _candidate_rank_tuple(signal, candidate)
         picked = {

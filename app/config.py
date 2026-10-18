@@ -210,13 +210,11 @@ GLOBAL_RISK_COOLDOWN_SECONDS = _read_positive_int_env("GLOBAL_RISK_COOLDOWN_SECO
 GLOBAL_RISK_MIN_PF = _read_positive_float_env("GLOBAL_RISK_MIN_PF", 0.90, minimum=0.0)
 GLOBAL_RISK_PF_WINDOW = _read_positive_int_env("GLOBAL_RISK_PF_WINDOW", 10, minimum=3)
 GLOBAL_RISK_PF_COOLDOWN_SECONDS = _read_positive_int_env("GLOBAL_RISK_PF_COOLDOWN_SECONDS", 3600, minimum=60)
-_MAX_TRADES_PER_HOUR_RAW = _read_positive_int_env("MAX_TRADES_PER_HOUR", 4, minimum=0)
-_MAX_TRADES_PER_DAY_RAW = _read_positive_int_env("MAX_TRADES_PER_DAY", 12, minimum=0)
-
-# Un valor 0 desactiva el límite correspondiente. El engine ya interpreta None
-# como "sin límite", por lo que evitamos que 0 bloquee todas las entradas.
-MAX_TRADES_PER_HOUR = None if _MAX_TRADES_PER_HOUR_RAW == 0 else _MAX_TRADES_PER_HOUR_RAW
-MAX_TRADES_PER_DAY = None if _MAX_TRADES_PER_DAY_RAW == 0 else _MAX_TRADES_PER_DAY_RAW
+# No hard trade quotas. Historical environment values MAX_TRADES_PER_HOUR and
+# MAX_TRADES_PER_DAY no longer gate LIVE entries; counts remain telemetry only.
+# DEMO already runs without these limits. Keep names for compatibility.
+MAX_TRADES_PER_HOUR = None
+MAX_TRADES_PER_DAY = None
 
 # ============================================================
 # SISTEMA DE FEES

@@ -313,7 +313,9 @@ class DemoOfflineTests(unittest.TestCase):
 
     def test_worker_persists_protected_break_even_stop_immediately(self):
         acc = ledger.change_status(7, active=True)
-        opened = simulator.open_position(acc, signal(), 100, 100.1)
+        # Compatibility test for already-open historical BE positions.
+        with patch.object(simulator, 'DEMO_BREAK_EVEN_ENABLED', True):
+            opened = simulator.open_position(acc, signal(), 100, 100.1)
         ledger.save(acc, opened)
         runner = worker.DemoMarketRunner()
         runner.protected_positions('SOL', 101, 101.1)
@@ -339,7 +341,8 @@ class DemoOfflineTests(unittest.TestCase):
 
     def test_demo_break_even_at_1r_covers_roundtrip_costs_and_uses_current_quote(self):
         acc = ledger.change_status(7, active=True)
-        opened = simulator.open_position(acc, signal(), 100, 100.1)
+        with patch.object(simulator, 'DEMO_BREAK_EVEN_ENABLED', True):
+            opened = simulator.open_position(acc, signal(), 100, 100.1)
         self.assertTrue(opened['position']['demo_be_enabled'])
         self.assertAlmostEqual(opened['position']['demo_be_trigger_r'], 1.0)
         unchanged = simulator.update_position(opened, 101, 101.1)
@@ -359,7 +362,8 @@ class DemoOfflineTests(unittest.TestCase):
 
     def test_demo_break_even_short_and_existing_legacy_position(self):
         acc = ledger.change_status(7, active=True)
-        opened = simulator.open_position(acc, signal('short'), 100, 100.1)
+        with patch.object(simulator, 'DEMO_BREAK_EVEN_ENABLED', True):
+            opened = simulator.open_position(acc, signal('short'), 100, 100.1)
         first = simulator.update_position(opened, 97, 97.1)
         self.assertFalse(first['position']['demo_be_armed'])
         armed = simulator.update_position(first, 96, 96.1)
@@ -656,30 +660,30 @@ class DemoOfflineTests(unittest.TestCase):
         self.assertIsNone(simulator.entry_gate_reason(acc, now=now))
         self.assertIsNotNone(simulator.open_position(acc, signal(), 100, 100.1))
 
-    def test_loss_symbol_cooldown_and_losing_signal_dedup(self):
+    def test_demo_has_no_extra_cooldown_beyond_live_signal_rules(self):
         acc = ledger.change_status(7, active=True)
         opened = simulator.open_position(acc, signal(), 100, 100.1)
         self.assertIsNotNone(opened)
         closed = simulator.update_position(opened, 97, 97.1)
         self.assertIsNone(closed['position'])
-        self.assertEqual(closed['losses'], 1)
         self.assertEqual(closed['risk_consecutive_losses'], 1)
         self.assertIsNone(simulator.entry_gate_reason(closed))
+        # DEMO cannot impose a different symbol cooldown or historical
+        # dedup gate than the LIVE selector. Fresh quotes and risk still apply.
         rejected = {}
-        self.assertIsNone(simulator.open_position(closed, signal(), 100, 100.1, rejection=rejected))
-        self.assertEqual(rejected['reason'], 'LOSS_SYMBOL_COOLDOWN')
-        other = signal()
-        other['symbol'] = 'BTC-PERP'
-        self.assertIsNotNone(simulator.open_position(closed, other, 100, 100.1))
-        # After thirty minutes, the exact losing setup remains consumed.
-        from datetime import timedelta, datetime, timezone
-        closed['history'][-1]['closed_at'] = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
-        rejected = {}
-        self.assertIsNone(simulator.open_position(closed, signal(), 100, 100.1, rejection=rejected))
-        self.assertEqual(rejected['reason'], 'LOSS_SIGNAL_ALREADY_TRADED')
-        fresh = signal()
-        fresh['signal']['signal_reference_price'] = 100.06
-        self.assertIsNotNone(simulator.open_position(closed, fresh, 100, 100.1))
+        repeat = simulator.open_position(closed, signal(), 100, 100.1, rejection=rejected)
+        self.assertIsNotNone(repeat, rejected)
+        self.assertFalse(rejected)
+
+    def test_demo_defaults_to_live_fixed_sl_tp_without_break_even(self):
+        acc = ledger.change_status(7, active=True)
+        opened = simulator.open_position(acc, signal(), 100, 100.1)
+        self.assertFalse(opened['position']['demo_be_enabled'])
+        progressed = simulator.update_position(opened, 102.7, 102.8)
+        self.assertIsNotNone(progressed['position'])
+        self.assertFalse(progressed['position']['demo_be_armed'])
+        self.assertEqual(progressed['position']['stop_price'],
+                         opened['position']['stop_price'])
 
     def test_nonnegotiable_demo_guards_remain(self):
         acc = ledger.change_status(7, active=True)
@@ -700,7 +704,7 @@ class DemoOfflineTests(unittest.TestCase):
         def selector(uid, excluded, *, execution_mode, min_top_book_notional=0, demo_fallback_limit=1):
             self.assertEqual(execution_mode, 'demo')
             self.assertEqual(min_top_book_notional, 0)
-            self.assertEqual(demo_fallback_limit, 3)
+            self.assertEqual(demo_fallback_limit, 1)
             seen.append(uid)
             return None
         with patch.object(engine, '_select_best_signal_from_scanner_shortlist', side_effect=selector, create=True):
@@ -808,7 +812,7 @@ class DemoOfflineTests(unittest.TestCase):
         picked['scanner'] = {'top_book_notional': 3000}
         captured = []
         def selector(uid, excluded, *, execution_mode, min_top_book_notional=0, demo_fallback_limit=1):
-            self.assertEqual(demo_fallback_limit, 3)
+            self.assertEqual(demo_fallback_limit, 1)
             captured.append((uid, set(excluded), execution_mode, min_top_book_notional))
             return picked
         with patch.object(engine, '_select_best_signal_from_scanner_shortlist', side_effect=selector):

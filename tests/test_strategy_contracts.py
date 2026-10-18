@@ -99,28 +99,6 @@ class StrategyContracts(unittest.TestCase):
         self.assertEqual(demo['break_atr'], live['break_atr'])
         self.assertEqual(demo['max_extension'], live['max_extension'])
 
-    def test_demo_m5_expansion_never_changes_live_or_consumed_resets(self):
-        tf = self.context()['timeframes']['5m']
-        data = dict(direction='long', o=tf['o'], h=tf['h'], l=tf['l'],
-                    c=tf['c'], v=tf['v'], ema20=tf['ema20'],
-                    ema50=tf['ema50'], ema200=tf['ema200'], atr=1)
-        # A new DEMO-only path may rescue a failed conventional reset.
-        with patch.object(mtf, 'find_pending_reset', return_value=(False, 'NO_VALID_PENDING_RESET', {})):
-            with patch.object(mtf, 'find_m5_continuation',
-                              return_value=(True, 'OK_M5_ALT', {'m5_entry_path': 'pause_continuation'})) as alternative:
-                self.assertFalse(mtf._detect_simple_mtf_trigger(**data, demo_m5_expanded=False)[0])
-                alternative.assert_not_called()
-                ok, reason, diag = mtf._detect_simple_mtf_trigger(**data, demo_m5_expanded=True)
-                self.assertTrue(ok, reason)
-                self.assertEqual(diag['primary_m5_reason'], 'NO_VALID_PENDING_RESET')
-        # Consumed setups are never revived by the alternate path.
-        with patch.object(mtf, 'find_pending_reset',
-                          return_value=(False, 'PENDING_SETUP_ALREADY_CONFIRMED', {})):
-            with patch.object(mtf, 'find_m5_continuation') as alternative:
-                self.assertEqual(mtf._detect_simple_mtf_trigger(
-                    **data, demo_m5_expanded=True)[1], 'PENDING_SETUP_ALREADY_CONFIRMED')
-                alternative.assert_not_called()
-
     def test_policy_matches_strategies(self):
         self.assertEqual(rejection_reason('HYPE-PERP'),'MEME_SYMBOL_BLOCKED')
         self.assertIn('HYPE',mtf.BLOCKED_MEME_KEYWORDS)

@@ -681,12 +681,13 @@ def _publish_scanner_runtime(
 PRICE_CHECK_INTERVAL = 0.4
 
 MIN_TRADE_STRENGTH = 0.18
-USER_TRADE_COOLDOWN_SECONDS = 600
+# No automatic participation pauses: frequency, loss streaks and PF are
+# telemetry, never eligibility. Execution/account protections remain.
 MAX_SIGNAL_EVAL_CANDIDATES = 12
 # ============================================================
-# RISK GOVERNOR (participation control)
-# - No toca estrategia ni TP/SL.
-# - Solo bloquea NUEVAS entradas cuando el rendimiento reciente es malo.
+# RISK PERFORMANCE TELEMETRY (non-blocking)
+# - Historical losses, consecutive streak and PF remain measurable.
+# - They NEVER block entries; only independent trade-safety checks may do so.
 # ============================================================
 
 USER_RISK_WINDOW = max(10, USER_RISK_PF_WINDOW)
@@ -796,15 +797,10 @@ def _apply_risk_close(user_id, profit, opportunity_key=None, global_profit=None)
         _user_risk_state[user_id] = st
 
     st["results"].append(float(profit))
-    if profit < 0:
-        st["consec_losses"] = int(st.get("consec_losses", 0)) + 1
-        st["cooldown_until"] = max(
-            float(st.get("cooldown_until") or 0.0),
-            now_ts + USER_RISK_LOSS_COOLDOWN_SECONDS,
-        )
-        st["cooldown_reason"] = "USER_SINGLE_LOSS_COOLDOWN"
-    else:
-        st["consec_losses"] = 0
+    st["consec_losses"] = int(st.get("consec_losses", 0)) + 1 if profit < 0 else 0
+    # Expire even persisted legacy pauses when writing the next snapshot.
+    st["cooldown_until"] = 0.0
+    st["cooldown_reason"] = ""
 
     count_global = not opportunity_key or opportunity_key not in _global_seen_opportunities
     if opportunity_key and count_global:
@@ -817,59 +813,27 @@ def _apply_risk_close(user_id, profit, opportunity_key=None, global_profit=None)
         else:
             _global_risk_state["consec_losses"] = 0
     
-    # user triggers
-    if st["consec_losses"] >= USER_RISK_MAX_CONSEC_LOSSES:
-        st["cooldown_until"] = max(float(st.get("cooldown_until") or 0.0), now_ts + USER_RISK_COOLDOWN_SECONDS)
-        st["cooldown_reason"] = f"USER_CONSEC_LOSSES_{st['consec_losses']}"
-    else:
-        # PF trigger only when we have enough samples
-        if len(st["results"]) >= USER_RISK_PF_WINDOW:
-            pf = _risk_pf(list(st["results"])[-USER_RISK_PF_WINDOW:])
-            if pf < USER_RISK_MIN_PF:
-                st["cooldown_until"] = max(float(st.get("cooldown_until") or 0.0), now_ts + USER_RISK_PF_COOLDOWN_SECONDS)
-                st["cooldown_reason"] = f"USER_PF_{pf:.2f}_WIN{USER_RISK_PF_WINDOW}"
-
-    if count_global:
-        # global triggers
-        if int(_global_risk_state.get("consec_losses", 0)) >= GLOBAL_RISK_MAX_CONSEC_LOSSES:
-            _global_risk_state["cooldown_until"] = max(float(_global_risk_state.get("cooldown_until") or 0.0), now_ts + GLOBAL_RISK_COOLDOWN_SECONDS)
-            _global_risk_state["cooldown_reason"] = f"GLOBAL_CONSEC_LOSSES_{_global_risk_state['consec_losses']}"
-        else:
-            if len(_global_risk_state["results"]) >= GLOBAL_RISK_PF_WINDOW:
-                pf_g = _risk_pf(list(_global_risk_state["results"])[-GLOBAL_RISK_PF_WINDOW:])
-                if pf_g < GLOBAL_RISK_MIN_PF:
-                    _global_risk_state["cooldown_until"] = max(float(_global_risk_state.get("cooldown_until") or 0.0), now_ts + GLOBAL_RISK_PF_COOLDOWN_SECONDS)
-                    _global_risk_state["cooldown_reason"] = f"GLOBAL_PF_{pf_g:.2f}_WIN{GLOBAL_RISK_PF_WINDOW}"
-
+    # Historical global pauses must not survive an updated risk snapshot.
+    _global_risk_state["cooldown_until"] = 0.0
+    _global_risk_state["cooldown_reason"] = ""
+    # PF and loss streak data are observable through the persisted results;
+    # no action on performance may suspend scanning or new entries.
 
 
 def _risk_governor_allows_new_entries(user_id: int) -> tuple[bool, str]:
-    now_ts = time.time()
+    """Performance is informational. Never suspend orders for losses/PF.
+
+    Best-effort metrics persistence remains independent of trade eligibility;
+    the critical exchange, position and account validation is elsewhere.
+    """
     with _risk_lock:
         if not _risk_flush_locked():
-            return False, "RISK_STATE_UNAVAILABLE"
-        # global first
-        g_until = float(_global_risk_state.get("cooldown_until") or 0.0)
-        if now_ts < g_until:
-            secs = int(g_until - now_ts)
-            reason = str(_global_risk_state.get("cooldown_reason") or "GLOBAL_COOLDOWN")
-            return False, f"RISK_GOV_GLOBAL_COOLDOWN ({secs}s) {reason}"
-
-        st = _user_risk_state.get(user_id)
-        if st:
-            u_until = float(st.get("cooldown_until") or 0.0)
-            if now_ts < u_until:
-                secs = int(u_until - now_ts)
-                reason = str(st.get("cooldown_reason") or "USER_COOLDOWN")
-                return False, f"RISK_GOV_USER_COOLDOWN ({secs}s) {reason}"
-
+            log(f"RISK_TELEMETRY_UNAVAILABLE user={user_id}; entries unaffected", "WARN")
     return True, "OK"
 
 
-# Startup grace to avoid an immediate trade right after a deploy/restart
-STARTUP_GRACE_SECONDS = int(os.getenv('STARTUP_GRACE_SECONDS', '30'))
-PROCESS_START_TIME_UTC = datetime.utcnow()
-
+# Backoff only after an exchange no-fill/error (prevents repeated failing IOC
+# orders). This is NOT a loss, frequency or post-close participation cap.
 SYMBOL_NOFILL_COOLDOWN_SECONDS = 90
 
 # ✅ Sizing (la fuente de verdad vive en app.config)
@@ -896,9 +860,7 @@ TP_FORCE_CHECK_INTERVAL = 15.0      # segundos entre re-evaluaciones de fuerza
 # STATE (rate limit / cooldown) — requerido por trading_loop
 # ============================================================
 
-# user_id -> datetime (cooldown entre trades)
-user_next_trade_time: dict[int, datetime] = {}
-
+# Counts remain available for monitoring only; no trade quotas are enforced.
 # user_id -> {"hour_key": str, "hour_count": int, "day": date, "day_count": int}
 user_trade_counter: dict[int, dict] = {}
 
@@ -2568,46 +2530,13 @@ def _hour_key(now: datetime) -> str:
     return now.strftime("%Y-%m-%d-%H")
 
 def _can_trade_now(user_id: int) -> tuple[bool, str]:
-    now = datetime.utcnow()
-    # Per-user startup grace: prevents an immediate entry right after a deploy/restart.
-    # We only set this once per process and per user, so normal cooldown rules still apply afterwards.
-    if STARTUP_GRACE_SECONDS > 0 and user_id not in user_next_trade_time:
-        user_next_trade_time[user_id] = PROCESS_START_TIME_UTC + timedelta(seconds=STARTUP_GRACE_SECONDS)
-        log(f"Startup grace activo ({STARTUP_GRACE_SECONDS}s) para usuario {user_id}", "INFO")
+    """No per-hour/day quotas, startup grace or post-close cooldown.
 
-
-    next_time = user_next_trade_time.get(user_id)
-    if next_time and now < next_time:
-        secs = int((next_time - now).total_seconds())
-        return False, f"Cooldown usuario activo ({secs}s)"
-
-    state = user_trade_counter.get(user_id)
-    if not state:
-        user_trade_counter[user_id] = {
-            "hour_key": _hour_key(now),
-            "hour_count": 0,
-            "day": date.today(),
-            "day_count": 0,
-        }
-        state = user_trade_counter[user_id]
-
-    hk = _hour_key(now)
-    if state["hour_key"] != hk:
-        state["hour_key"] = hk
-        state["hour_count"] = 0
-
-    today = date.today()
-    if state["day"] != today:
-        state["day"] = today
-        state["day_count"] = 0
-
-    if MAX_TRADES_PER_HOUR is not None and state["hour_count"] >= MAX_TRADES_PER_HOUR:
-        return False, f"Límite por hora alcanzado ({MAX_TRADES_PER_HOUR})"
-
-    if MAX_TRADES_PER_DAY is not None and state["day_count"] >= MAX_TRADES_PER_DAY:
-        return False, f"Límite por día alcanzado ({MAX_TRADES_PER_DAY})"
-
+    This is deliberately NOT the exchange/order/position safety gate; those
+    separate checks remain mandatory in execute_trade_cycle.
+    """
     return True, "OK"
+
 
 def _register_trade_attempt(user_id: int):
     now = datetime.utcnow()
@@ -2631,17 +2560,8 @@ def _register_trade_attempt(user_id: int):
     state["hour_count"] += 1
     state["day_count"] += 1
 
-    user_next_trade_time[user_id] = now + timedelta(seconds=USER_TRADE_COOLDOWN_SECONDS)
 
 
-
-def _register_post_close_cooldown(user_id: int):
-    """Aplica cooldown DESPUÉS de cerrar un trade (evita re-entrada inmediata al finalizar)."""
-    try:
-        user_next_trade_time[user_id] = datetime.utcnow() + timedelta(seconds=USER_TRADE_COOLDOWN_SECONDS)
-    except Exception:
-        # Nunca romper el engine por un fallo de cooldown
-        pass
 
 # ============================================================
 # CICLO PRINCIPAL
@@ -3376,7 +3296,6 @@ def _finalize_trade_close(
     except Exception as e:
         log(f"touch_user_operational_state close error {symbol} src={source} err={e}", "WARN")
 
-    _register_post_close_cooldown(user_id)
 
     try:
         admin_fee = max(float(profit), 0.0) * float(OWNER_FEE_PERCENT or 0.0)
@@ -3491,8 +3410,7 @@ def _reconcile_orphan_closed_trade(user_id: int) -> bool:
             )
         except Exception:
             pass
-        _register_post_close_cooldown(user_id)
-        _clear_active_trade(user_id)
+            _clear_active_trade(user_id)
         return True
 
     symbol = str(active.get("symbol") or "")
@@ -4865,7 +4783,7 @@ def execute_trade_cycle(user_id: int) -> dict | None:
             return {'event': 'EMERGENCY_EXIT_RECONCILIATION'}
 
         # Reconciliación defensiva: si el exchange ya no tiene posición pero el bot
-        # conserva estado activo en memoria, registramos el cierre y activamos cooldown.
+        # conserva estado activo en memoria, registramos el cierre sin imponer pausas.
         try:
             if _reconcile_orphan_closed_trade(user_id):
                 log(f"Usuario {user_id} — cierre reconciliado desde exchange", "CRITICAL")

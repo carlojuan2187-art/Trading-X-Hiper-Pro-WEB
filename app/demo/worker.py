@@ -386,7 +386,7 @@ class DemoMarketRunner:
                 # Only DEMO execution and the isolated fallback queue differ.
                 # The real order-side depth is checked at simulated entry.
                 selected = engine._select_best_signal_from_scanner_shortlist(
-                    uid, set(), execution_mode='demo', demo_fallback_limit=3)
+                    uid, set(), execution_mode='demo', demo_fallback_limit=1)
                 if selected and selected.get('symbol'):
                     logger.info('DEMO_SIGNAL_TRACE user=%s symbol=%s data=%s', uid,
                                 selected['symbol'], json.dumps({
@@ -516,26 +516,18 @@ async def async_main() -> None:
         raise SystemExit('DEMO_WORKER_MODE=true requerido en servicio worker dedicado')
     ledger.COLLECTION.create_index('enabled')
     ledger.COLLECTION.create_index('position.symbol')
-    from app.strategies.breakout_reset import DEMO_STRATEGY_EXPERIMENTAL, DEMO_H1_EARLY_REVERSAL_ENABLED
     from app.config import SCAN_INTERVAL, SCANNER_MIN_TOP_BOOK_NOTIONAL
-    from app.market_scanner import _DEMO_TOP_BOOK_MIN_NOTIONAL
-    from app.demo.settings import DEMO_BREAK_EVEN_ENABLED, DEMO_BREAK_EVEN_TRIGGER_R
-    from app.strategies.liquidity_sweep_reversal import (
-        DEMO_LIQUIDITY_MAX_SWEEP_AGE_BARS, SWEEP_MAX_AGE_BARS,
-    )
-    logger.info('DEMO_EXPERIMENT_PROFILE break_even=%s trigger_r=%.2f '
-                'liquidity_max_age_bars=%s live_liquidity_max_age_bars=%s',
-                DEMO_BREAK_EVEN_ENABLED, DEMO_BREAK_EVEN_TRIGGER_R,
-                DEMO_LIQUIDITY_MAX_SWEEP_AGE_BARS, SWEEP_MAX_AGE_BARS)
+    from app.demo.settings import DEMO_BREAK_EVEN_ENABLED
+    from app.strategies.liquidity_sweep_reversal import SWEEP_MAX_AGE_BARS
+    logger.info(
+        'DEMO_LIVE_PARITY strategy_context=live scanner_context=live '
+        'H1_M15_M5=live liquidity_sweep_max_age_bars=%s '
+        'break_even=%s fallback_alternatives=off '
+        'scanner_s=%.1f live_scanner_s=%s scanner_book_usdc=%.2f '
+        'execution=paper_bid_ask_only',
+        SWEEP_MAX_AGE_BARS, DEMO_BREAK_EVEN_ENABLED,
+        DEMO_SCAN_SECONDS, SCAN_INTERVAL, SCANNER_MIN_TOP_BOOK_NOTIONAL)
     logger.info('DEMO WebSocket event-driven; no LIVE execution; private keys never loaded')
-    logger.info('DEMO_H1_PROFILE early_reversal=%s m15_unchanged=true m5_unchanged=true',
-                DEMO_H1_EARLY_REVERSAL_ENABLED)
-    logger.info('DEMO_PARITY_PROFILE scanner_s=%.1f live_scanner_s=%s '
-                'scanner_book_usdc=%.2f live_scanner_book_usdc=%.2f '
-                'strategy_profile=%s book_model=live_directional_impact_band',
-                DEMO_SCAN_SECONDS, SCAN_INTERVAL, _DEMO_TOP_BOOK_MIN_NOTIONAL,
-                SCANNER_MIN_TOP_BOOK_NOTIONAL,
-                'EXPERIMENTAL' if DEMO_STRATEGY_EXPERIMENTAL else 'LIVE_PARITY')
     delay = 1
     while True:
         try:

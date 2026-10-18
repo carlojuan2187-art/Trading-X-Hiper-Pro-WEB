@@ -263,7 +263,7 @@ class RiskPersistenceTests(unittest.TestCase):
         return functions('app/trading_engine.py', {'_risk_pf', '_risk_load_locked', '_risk_save_locked',
             '_risk_flush_locked', '_risk_record_close', '_apply_risk_close', '_risk_governor_allows_new_entries'}, ns)
 
-    def test_persists_cooldown_and_deduplicates_shared_opportunity(self):
+    def test_persists_risk_statistics_without_blocking_entries(self):
         class Store:
             doc = None
             def find_one(self, query): return deepcopy(self.doc)
@@ -275,13 +275,38 @@ class RiskPersistenceTests(unittest.TestCase):
         self.assertEqual(len(ns['_global_risk_state']['results']), 1)
         self.assertEqual(len(ns['_user_risk_state'][1]['results']), 1)
         restarted = self.namespace(store)
-        self.assertFalse(restarted['_risk_governor_allows_new_entries'](1)[0])
+        self.assertEqual(restarted['_risk_governor_allows_new_entries'](1), (True, 'OK'))
+        self.assertEqual(restarted['_user_risk_state'][1]['consec_losses'], 1)
+        self.assertEqual(restarted['_user_risk_state'][1]['cooldown_until'], 0.0)
+        self.assertEqual(restarted['_global_risk_state']['cooldown_until'], 0.0)
+        self.assertEqual(len(restarted['_global_risk_state']['results']), 1)
 
-    def test_unavailable_persistence_blocks_entries(self):
+    def test_unavailable_nonessential_risk_metrics_never_pauses_entries(self):
         class Store:
             def find_one(self, _): raise OSError('offline')
         ns = self.namespace(Store())
-        self.assertEqual(ns['_risk_governor_allows_new_entries'](1), (False, 'RISK_STATE_UNAVAILABLE'))
+        self.assertEqual(ns['_risk_governor_allows_new_entries'](1), (True, 'OK'))
+
+    def test_old_persisted_user_and_global_cooldowns_are_erased(self):
+        class Store:
+            def __init__(self):
+                self.doc = {
+                    'users': {'1': {'results': [-1, -2], 'consec_losses': 2,
+                                    'cooldown_until': time.time() + 90000,
+                                    'cooldown_reason': 'USER_CONSEC_LOSSES_2'}},
+                    'global': {'results': [-1], 'consec_losses': 1,
+                               'cooldown_until': time.time() + 90000,
+                               'cooldown_reason': 'GLOBAL_PF_0.1'}
+                }
+            def find_one(self, _): return deepcopy(self.doc)
+            def update_one(self, query, update, **kwargs):
+                self.doc = deepcopy(update['$set'])
+        store = Store()
+        ns = self.namespace(store)
+        self.assertEqual(ns['_risk_governor_allows_new_entries'](1), (True, 'OK'))
+        self.assertEqual(store.doc['users']['1']['cooldown_until'], 0.0)
+        self.assertEqual(store.doc['global']['cooldown_until'], 0.0)
+        self.assertEqual(store.doc['users']['1']['results'], [-1, -2])
 
     def test_pf_uses_last_six_not_ten(self):
         class Store:
@@ -291,9 +316,38 @@ class RiskPersistenceTests(unittest.TestCase):
         # Four large old losses, then six wins. Final PF must use only six wins.
         for i, profit in enumerate([-100]*4 + [1]*6):
             ns['_risk_record_close'](1, profit, str(i), profit, str(i))
-        self.assertFalse(ns['_user_risk_state'][1]['cooldown_reason'].startswith('USER_PF_0.01'))
+        self.assertEqual(ns['_user_risk_state'][1]['cooldown_reason'], '')
+        self.assertEqual(ns['_user_risk_state'][1]['cooldown_until'], 0.0)
         # Last close must not extend the existing PF cooldown once old losses leave the window.
         self.assertEqual(list(ns['_user_risk_state'][1]['results'])[-6:], [1]*6)
+
+
+class LiveTradeParticipationWithoutQuotas(unittest.TestCase):
+    def namespace(self):
+        from datetime import date
+        ns = {
+            'datetime': datetime, 'date': date,
+            'user_trade_counter': {},
+        }
+        return functions('app/trading_engine.py',
+                         {'_hour_key', '_can_trade_now', '_register_trade_attempt'}, ns)
+
+    def test_many_completed_trade_attempts_never_saturate_hour_or_day(self):
+        ns = self.namespace()
+        for n in range(35):
+            ns['_register_trade_attempt'](42)
+            allowed, reason = ns['_can_trade_now'](42)
+            self.assertTrue(allowed, (n, reason))
+        self.assertEqual(ns['user_trade_counter'][42]['hour_count'], 35)
+        self.assertEqual(ns['user_trade_counter'][42]['day_count'], 35)
+
+    def test_old_per_user_cooldown_cannot_disable_new_entry(self):
+        ns = self.namespace()
+        ns['user_trade_counter'][42] = {
+            'hour_key': '2000-01-01-00', 'hour_count': 9000,
+            'day': None, 'day_count': 9000,
+        }
+        self.assertEqual(ns['_can_trade_now'](42), (True, 'OK'))
 
 
 class IOCContractTests(unittest.TestCase):

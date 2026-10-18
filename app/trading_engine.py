@@ -724,20 +724,31 @@ _processed_risk_closes = deque(maxlen=4000)
 
 
 def _risk_load_locked() -> bool:
-    global _risk_loaded
+    global _risk_loaded, _risk_dirty
     if _risk_loaded:
         return True
     try:
         doc = database_module.settings_col.find_one({'_id': 'risk_governor_v2'}) or {}
+        cleared_legacy_pause = False
         for uid, raw in (doc.get('users') or {}).items():
             state = dict(raw)
             state['results'] = deque(state.get('results', []), maxlen=USER_RISK_WINDOW)
+            if state.get('cooldown_until') or state.get('cooldown_reason'):
+                cleared_legacy_pause = True
+            state['cooldown_until'] = 0.0
+            state['cooldown_reason'] = ''
             _user_risk_state[int(uid)] = state
         raw_global = doc.get('global') or {}
         _global_risk_state.update(raw_global)
+        if _global_risk_state.get('cooldown_until') or _global_risk_state.get('cooldown_reason'):
+            cleared_legacy_pause = True
+        _global_risk_state['cooldown_until'] = 0.0
+        _global_risk_state['cooldown_reason'] = ''
         _global_risk_state['results'] = deque(raw_global.get('results', []), maxlen=GLOBAL_RISK_WINDOW)
         _global_seen_opportunities.extend(doc.get('seen_opportunities', []))
         _processed_risk_closes.extend(doc.get('processed_closes', []))
+        # Persist removal of old pauses without erasing PnL/history.
+        _risk_dirty = _risk_dirty or cleared_legacy_pause
         _risk_loaded = True
         return True
     except Exception as exc:
@@ -785,7 +796,6 @@ def _risk_record_close(user_id: int, profit: float, opportunity_key=None, global
 
 
 def _apply_risk_close(user_id, profit, opportunity_key=None, global_profit=None):
-    now_ts = time.time()
     st = _user_risk_state.get(user_id)
     if not st:
         st = {
@@ -2523,7 +2533,7 @@ def _cooldown_symbol(user_id: int, symbol: str, seconds: int = SYMBOL_NOFILL_COO
         pass
 
 # ============================================================
-# RATE LIMIT (por usuario)
+# METRICS ONLY: per-user entry counts (no rate limit)
 # ============================================================
 
 def _hour_key(now: datetime) -> str:

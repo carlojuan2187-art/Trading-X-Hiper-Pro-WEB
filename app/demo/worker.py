@@ -140,6 +140,15 @@ class DemoMarketRunner:
         self.ai_universe = (configured_symbols(self.ai_policy.symbols) if self.ai_policy else ())
         if self.ai_policy and not set(self.ai_universe).issubset(self.ai_policy.symbols):
             raise RuntimeError("AI DEMO symbols absent from trained model; refuse legacy fallback")
+        if self.ai_policy is not None:
+            # Rebuild identical online actor corrections after crash/reconnect.
+            # Collection is isolated to Trading X paper-only closed AI trades.
+            records = list(db['demo_ai_experiences'].find(
+                {'model_version': self.ai_policy.version}).sort(
+                'closed_at', 1).limit(10000))
+            restored = self.ai_policy.restore_closed_trades(records)
+            logger.info("DEMO_AI_ONLINE_RESTORED model=%s state=%s",
+                        self.ai_policy.version, json.dumps(restored, sort_keys=True))
         self.ai_market = CandleStore() if AI_DEMO_MODE else None
         self.ai_exit_seen: dict[str, int] = {}
         # user_id -> (selected_signal, monotonically-ordered queue timestamp)
@@ -178,6 +187,21 @@ class DemoMarketRunner:
         logger.info('DEMO_TRADE_TRACE event=%s user=%s trade_id=%s symbol=%s data=%s',
                     event, uid, p.get('id', ''), p.get('symbol', ''),
                     json.dumps(payload, sort_keys=True, default=str))
+
+    def learn_closed_paper(self, trade: dict) -> None:
+        """Apply a bounded real-outcome learning step after a saved AI DEMO close."""
+        if self.ai_policy is None or trade.get('decision_source') != 'ai_ppo_only':
+            return
+        from app.demo.ai_experience import build_closed_experience
+        record = build_closed_experience(trade)
+        if record is None:
+            logger.warning("DEMO_AI_ONLINE_SKIPPED reason=incomplete_trade id=%s", trade.get('id'))
+            return
+        if self.ai_policy.observe_closed_trade(record):
+            logger.info("DEMO_AI_ONLINE_LEARNED coin=%s model=%s net_pnl=%.8f "
+                        "state=%s", record['symbol'], record['model_version'],
+                        record['pnl_net_usdc'], json.dumps(
+                            self.ai_policy.feedback.snapshot(), sort_keys=True))
 
     def protected_positions(self, symbol: str, bid: float, ask: float) -> tuple[int, int]:
         marked = closed = 0
@@ -248,6 +272,7 @@ class DemoMarketRunner:
                                     )
                                 }, sort_keys=True, default=str))
                     self.trace_trade('CLOSED', int(account['_id']), trade, bid=bid, ask=ask)
+                    self.learn_closed_paper(trade)
                     closed += 1
                 else:
                     # Keep exact WS extrema between Mongo writes. Periodic
@@ -481,6 +506,7 @@ class DemoMarketRunner:
                     self.audit_flush_at.pop(key, None)
                     self.trace_trade("AI_CLOSED", int(account["_id"]), saved["history"][-1],
                                      model=action.model_version)
+                    self.learn_closed_paper(saved["history"][-1])
                     closed += 1
             except ledger.Conflict:
                 logger.info("DEMO AI close race avoided user=%s", account["_id"])

@@ -43,7 +43,7 @@ def load_csv(path: Path, symbol: str) -> list[dict]:
     return rows
 
 
-def environment(rows: list[dict], *, training: bool, seed: int = 1):
+def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 1):
     import gymnasium as gym
     import numpy as np
     from gymnasium import spaces
@@ -57,6 +57,7 @@ def environment(rows: list[dict], *, training: bool, seed: int = 1):
             self.observation_space = spaces.Box(low=-3, high=3,
                                                 shape=(len(OBS_NAMES),), dtype=np.float32)
             self.random = random.Random(seed)
+            self.rows = next(iter(datasets.values()))
             self.start = 40
             self.idx = 40
             self.cash = 1000.0
@@ -73,6 +74,7 @@ def environment(rows: list[dict], *, training: bool, seed: int = 1):
 
         def _obs(self):
             # Observation at step i uses CLOSED bars [i-40, i) only.
+            rows = self.rows
             last = rows[self.idx-1]
             spread = 0.0002
             px = last["c"]
@@ -89,6 +91,8 @@ def environment(rows: list[dict], *, training: bool, seed: int = 1):
 
         def reset(self, *, seed=None, options=None):
             super().reset(seed=seed)
+            self.rows = datasets[self.random.choice(tuple(datasets))] if training else next(iter(datasets.values()))
+            rows = self.rows
             if training and len(rows) > 700:
                 self.idx = self.random.randrange(40, len(rows)-512)
             else:
@@ -114,6 +118,7 @@ def environment(rows: list[dict], *, training: bool, seed: int = 1):
 
         def step(self, action):
             act, stop_bin, take_bin = map(int, action)
+            rows = self.rows
             bar = rows[self.idx]
             before = self._mark(rows[self.idx-1]["c"])
             px = bar["o"]
@@ -165,8 +170,8 @@ def environment(rows: list[dict], *, training: bool, seed: int = 1):
     return PaperEnv()
 
 
-def evaluate(model, rows):
-    env = environment(rows, training=False)
+def evaluate_one(model, rows):
+    env = environment({"validation": rows}, training=False)
     obs, _ = env.reset()
     done = truncated = False
     while not (done or truncated):
@@ -186,7 +191,7 @@ def evaluate(model, rows):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", required=True)
-    ap.add_argument("--symbol", required=True)
+    ap.add_argument("--symbols", default="BTC,ETH,SOL")
     ap.add_argument("--output", default="models/trading_x_ppo")
     ap.add_argument("--steps", type=int, default=250_000)
     args = ap.parse_args()
@@ -198,17 +203,19 @@ def main():
         import torch
     except ImportError as exc:
         raise SystemExit("Install offline training dependencies from requirements-ai-train.txt") from exc
-    symbol = args.symbol.upper()
-    rows = load_csv(Path(args.csv), symbol)
-    split = int(len(rows)*0.75)
-    train, test = rows[:split], rows[split-40:]
+    symbols = tuple(dict.fromkeys(x.strip().upper() for x in args.symbols.split(",") if x.strip()))
+    if not symbols or len(symbols) > 12:
+        ap.error("Choose between 1 and 12 symbols")
+    datasets = {symbol: load_csv(Path(args.csv), symbol) for symbol in symbols}
+    train = {symbol: rows[:int(len(rows)*0.75)] for symbol, rows in datasets.items()}
+    test = {symbol: rows[int(len(rows)*0.75)-40:] for symbol, rows in datasets.items()}
     env = environment(train, training=True)
     check_env(env)
     model = PPO("MlpPolicy", env, verbose=1, seed=17, device="cpu",
                 policy_kwargs={"net_arch": {"pi": [32, 32], "vf": [32, 32]},
                                "activation_fn": torch.nn.Tanh})
     model.learn(total_timesteps=args.steps)
-    result = evaluate(model, test)
+    result = {symbol: evaluate_one(model, rows) for symbol, rows in test.items()}
     policy = model.policy
     def layer(module):
         return {"weight": module.weight.detach().cpu().tolist(),
@@ -227,8 +234,8 @@ def main():
         "schema": MODEL_SCHEMA, "version": f"ppo-{int(time.time())}",
         "observation_names": list(OBS_NAMES), "action_dims": [4, 3, 3],
         "actor_file": "actor.json", "actor_sha256": sha256(raw).hexdigest(),
-        "trained_symbols": [symbol], "approved_for_demo": False,
-        "training_candles": len(train), "holdout": result,
+        "trained_symbols": list(symbols), "approved_for_demo": False,
+        "training_candles": {s: len(b) for s, b in train.items()}, "holdout": result,
         "training_algorithm": "PPO", "steps": args.steps,
         "fee_bps_per_side": 5, "slippage_and_spread_bps_per_side": 3,
     }

@@ -66,3 +66,41 @@ def build_closed_experience(trade: dict) -> dict | None:
         }
     except (ValueError, TypeError, KeyError, OverflowError):
         return None
+
+
+def backfill_closed_experiences(accounts_collection, experiences_collection) -> dict:
+    """Recover feedback after a transient Mongo archive failure or worker restart.
+
+    Reads only retained DEMO history, never LIVE. Upserts are idempotent. Runs
+    in a dedicated background thread so WS exits and protective orders continue.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+    recovered, existing, invalid, errors = 0, 0, 0, 0
+    cursor = accounts_collection.find(
+        {"history.decision_source": "ai_ppo_only"},
+        {"history": 1}
+    )
+    for account in cursor:
+        for trade in account.get("history", []):
+            if trade.get("decision_source") != "ai_ppo_only":
+                continue
+            experience = build_closed_experience(trade)
+            if experience is None:
+                invalid += 1
+                continue
+            try:
+                result = experiences_collection.update_one(
+                    {"_id": experience["_id"]},
+                    {"$setOnInsert": experience}, upsert=True)
+                if result.upserted_id is not None:
+                    recovered += 1
+                else:
+                    existing += 1
+            except Exception:
+                errors += 1
+                log.exception("DEMO_AI_EXPERIENCE_BACKFILL_FAILED trade=%s", trade.get("id"))
+    totals = {"recovered": recovered, "already_saved": existing,
+              "legacy_missing_entry_state": invalid, "errors": errors}
+    log.info("DEMO_AI_EXPERIENCE_BACKFILL totals=%s", totals)
+    return totals

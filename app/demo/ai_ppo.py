@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import Path
+from threading import RLock
 import time
 import uuid
 
@@ -100,6 +101,7 @@ class CandleStore:
     def __init__(self):
         self.rows: dict[str, deque] = defaultdict(lambda: deque(maxlen=80))
         self.books: dict[str, tuple[float, float, int]] = {}
+        self.lock = RLock()
 
     def push_candle(self, data: dict) -> bool:
         try:
@@ -113,28 +115,31 @@ class CandleStore:
             values = [float(row[k]) for k in ("o", "h", "l", "c", "v")]
             if not all(map(math.isfinite, values)) or min(values[:4]) <= 0:
                 return False
-            existing = self.rows[coin]
-            if existing and row["t"] < existing[-1]["t"]:
-                return False
-            if existing and row["t"] == existing[-1]["t"]:
-                existing[-1] = row
-            else:
-                existing.append(row)
-            return True
+            with self.lock:
+                existing = self.rows[coin]
+                if existing and row["t"] < existing[-1]["t"]:
+                    return False
+                if existing and row["t"] == existing[-1]["t"]:
+                    existing[-1] = row
+                else:
+                    existing.append(row)
+                return True
         except (TypeError, KeyError, ValueError, OverflowError):
             return False
 
     def push_book(self, coin: str, bid: float, ask: float) -> None:
         if valid_quote(bid, ask):
-            self.books[coin.upper()] = (bid, ask, int(time.time()*1000))
+            with self.lock:
+                self.books[coin.upper()] = (bid, ask, int(time.time()*1000))
 
     def snapshot(self, coin: str, *, now_ms: int | None = None):
         now = int(time.time()*1000) if now_ms is None else now_ms
-        quote = self.books.get(coin)
-        if quote is None or not 0 <= now - quote[2] <= 2500:
-            return None
-        # Last WS candle is generally unfinished, always discard by close time.
-        bars = [b for b in self.rows[coin] if b["t"] + BAR_MS <= now]
+        with self.lock:
+            quote = self.books.get(coin)
+            if quote is None or not 0 <= now - quote[2] <= 2500:
+                return None
+            # Never include an unfinished streaming candle.
+            bars = [b.copy() for b in self.rows[coin] if b["t"] + BAR_MS <= now]
         if len(bars) < 40 or now - (bars[-1]["t"] + BAR_MS) > BAR_MS:
             return None
         return bars[-40:], quote[0], quote[1]
@@ -251,7 +256,11 @@ def open_ai_position(account: dict, decision: Decision, bid: float, ask: float,
     if stop <= 0 or target <= 0 or not all(map(math.isfinite, (stop, target))):
         return reject("INVALID_AI_EXITS")
     balance = float(account["balance_usdc"])
-    margin = balance * POSITION_PERCENT
+    # Explicit AI research cap even when the legacy account's margin cap is disabled.
+    ai_margin_cap = float(os.getenv("DEMO_AI_MAX_MARGIN_USDC", "25"))
+    if not math.isfinite(ai_margin_cap) or not 1 <= ai_margin_cap <= 1000:
+        raise ValueError("DEMO_AI_MAX_MARGIN_USDC must be between 1 and 1000")
+    margin = min(balance*POSITION_PERCENT, ai_margin_cap)
     if MAX_TRADE_MARGIN_USDC > 0:
         margin = min(margin, MAX_TRADE_MARGIN_USDC)
     margin = _money(min(margin, balance/(1 + LEVERAGE*DEMO_TAKER_FEE_BPS/10000)-1e-8))

@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from app.demo.ai_experience import build_closed_experience, clean_observation
+from app.demo.ai_experience import build_closed_experience, clean_observation, backfill_closed_experiences
 from app.demo.ai_features import OBS_NAMES
 from tools.ppo_demo_feedback import load_feedback, refine_actor_with_closed_feedback
 
@@ -47,6 +47,26 @@ class TestPPOClosedExperience(unittest.TestCase):
         self.assertIsNone(build_closed_experience(source))
         with self.assertRaises(ValueError):
             clean_observation([0.0]*2)
+
+    def test_backfill_is_idempotent_and_only_demo_ai(self):
+        trade = closed_trade(pnl=2.5)
+        accounts = type("Accounts", (), {
+            "find": lambda self, query, projection: [{"history": [trade, {"decision_source": "legacy"}]}]
+        })()
+        class FeedbackStore:
+            def __init__(self):
+                self.rows = {}
+            def update_one(self, query, update, upsert):
+                value = update["$setOnInsert"]
+                existed = value["_id"] in self.rows
+                self.rows.setdefault(value["_id"], value)
+                return type("Update", (), {"upserted_id": None if existed else value["_id"]})()
+        store = FeedbackStore()
+        first = backfill_closed_experiences(accounts, store)
+        second = backfill_closed_experiences(accounts, store)
+        self.assertEqual(first["recovered"], 1)
+        self.assertEqual(second["recovered"], 0)
+        self.assertEqual(second["already_saved"], 1)
 
     def test_feedback_load_dedup_and_minimum_samples(self):
         row=build_closed_experience(closed_trade(pnl=-0.4))

@@ -42,6 +42,8 @@ DEMO_AI_SYMBOLS=BTC,ETH,SOL
 DEMO_AI_MAX_MARGIN_USDC=25
 ```
 
+El primer entrenador usa el perfil explícito: 100 USDC de capital, margen máximo 25 USDC, 10x, POSITION_PERCENT=1.0, 5 bps por comisión y 2 bps de slippage más 1 bp aproximado de spread por lado. Por seguridad la carga del modelo **rechaza** una configuración que no coincida con el perfil (incluido `MAX_TRADE_MARGIN_USDC`, que debe ser 0 o al menos 25). Si la configuración real difiere, hay que adaptar el simulador de entrenamiento y volver a entrenar antes de aprobarlo. El spread real nunca se asume constante en el worker.
+
 Build: `pip install -r requirements.txt`
 Start: `python -m app.demo.worker`
 Replica: 1 (el lease de Mongo evita colisiones). Asegura que `actor.json` y `manifest.json` aprobados estén disponibles en el mismo directorio del contenedor. El worker no instala dependencies de entrenamiento y no necesita API key de exchange para el paper trading.

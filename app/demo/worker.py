@@ -308,7 +308,9 @@ class DemoMarketRunner:
                     continue
                 reason: dict = {}
                 updated = (open_ai_position(current, selected["ai_decision"], bid, ask,
-                                            float(selected["ai_atr"]), rejection=reason)
+                                            float(selected["ai_atr"]), rejection=reason,
+                                            entry_observation=selected["ai_entry_observation"],
+                                            decision_candle_ms=selected["ai_decision_candle_ms"])
                            if AI_DEMO_MODE else open_position(current, selected, bid, ask,
                                                              rejection=reason))
                 if updated:
@@ -414,14 +416,14 @@ class DemoMarketRunner:
                             coin, decision.action, decision.model_version,
                             decision.probability, decision.stop_atr, decision.take_atr)
                 if decision.action in ("LONG", "SHORT"):
-                    candidates.append((decision.probability, decision, atr, bars[-1]["t"]))
+                    candidates.append((decision.probability, decision, atr, bars[-1]["t"], obs))
             except (TypeError, ValueError, ZeroDivisionError) as exc:
                 logger.warning("DEMO_AI_OBSERVATION_REJECTED coin=%s reason=%s", coin, exc)
         candidates.sort(key=lambda x: x[0], reverse=True)
         pending = {}
         for account in pool:
             last_entry = account.get("last_entry_at")
-            for _, decision, atr, decision_bar in candidates:
+            for _, decision, atr, decision_bar, entry_obs in candidates:
                 # At most one entry per completed candle after a previous entry.
                 if last_entry:
                     try:
@@ -433,6 +435,7 @@ class DemoMarketRunner:
                 pending[int(account["_id"])] = ({
                     "symbol": f"{decision.symbol}-PERP", "ai_decision": decision,
                     "ai_atr": atr, "decision_source": "ai_ppo_only",
+                    "ai_entry_observation": entry_obs, "ai_decision_candle_ms": decision_bar,
                 }, time.monotonic())
                 break
         return pending, next_offset

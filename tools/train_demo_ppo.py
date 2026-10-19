@@ -16,7 +16,7 @@ from pathlib import Path
 import random
 import time
 
-from app.demo.ai_ppo import OBS_NAMES, BAR_MS, MODEL_SCHEMA, observation, STOP_ATR, TAKE_ATR
+from app.demo.ai_features import OBS_NAMES, BAR_MS, MODEL_SCHEMA, observation, STOP_ATR, TAKE_ATR
 
 
 def load_csv(path: Path, symbol: str) -> list[dict]:

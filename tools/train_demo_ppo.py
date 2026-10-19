@@ -212,7 +212,8 @@ def evaluate_one(model, rows, profile):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", required=True)
-    ap.add_argument("--symbols", default="BTC,ETH,SOL")
+    ap.add_argument("--symbols", default="BTC,ETH,SOL", help="auto: train on every downloaded LIVE-eligible coin in CSV")
+    ap.add_argument("--universe-report", default="", help="JSON coverage report from LIVE downloader")
     ap.add_argument("--output", default="models/trading_x_ppo")
     ap.add_argument("--steps", type=int, default=250_000)
     ap.add_argument("--initial-capital", type=float, default=100)
@@ -248,9 +249,25 @@ def main():
         import torch
     except ImportError as exc:
         raise SystemExit("Install offline training dependencies from requirements-ai-train.txt") from exc
-    symbols = tuple(dict.fromkeys(x.strip().upper() for x in args.symbols.split(",") if x.strip()))
-    if not symbols or len(symbols) > 12:
-        ap.error("Choose between 1 and 12 symbols")
+    universe_report = None
+    if args.universe_report:
+        universe_report = json.loads(Path(args.universe_report).read_text(encoding="utf-8"))
+    if args.symbols.strip().lower() == "auto":
+        with Path(args.csv).open(newline="", encoding="utf-8") as handle:
+            symbols = tuple(sorted({str(row.get("symbol") or "").upper()
+                                    for row in csv.DictReader(handle) if row.get("symbol")}))
+        if universe_report is None or universe_report.get("source") != "LIVE_SCANNER_PREFILTER":
+            ap.error("--symbols auto requires --universe-report for the LIVE training data")
+        report_symbols = {row["symbol"] for row in universe_report["downloaded"]}
+        if set(symbols) != report_symbols:
+            ap.error("Downloaded LIVE coin set differs from the audited training CSV")
+        requested = universe_report["requested"]
+        if not requested or len(symbols) < 10 or len(symbols)/len(requested) < 0.8:
+            ap.error("Insufficient eligible LIVE training data coverage")
+    else:
+        symbols = tuple(dict.fromkeys(x.strip().upper() for x in args.symbols.split(",") if x.strip()))
+    if not symbols or len(symbols) > 250:
+        ap.error("Choose between 1 and 250 symbols")
     datasets = {symbol: load_csv(Path(args.csv), symbol) for symbol in symbols}
     train = {symbol: rows[:int(len(rows)*0.75)] for symbol, rows in datasets.items()}
     test = {symbol: rows[int(len(rows)*0.75)-40:] for symbol, rows in datasets.items()}
@@ -283,6 +300,12 @@ def main():
         "training_candles": {s: len(b) for s, b in train.items()}, "holdout": result,
         "training_algorithm": "PPO", "steps": args.steps,
         "runtime_profile": profile,
+        "universe_source": universe_report.get("source") if universe_report else "EXPLICIT_SYMBOLS",
+        "universe_snapshot_timestamp_ms": (universe_report.get("snapshot_timestamp_ms")
+                                            if universe_report else None),
+        "universe_requested_symbols": universe_report.get("requested") if universe_report else list(symbols),
+        "universe_excluded": universe_report.get("excluded", {}) if universe_report else {},
+        "universe_coverage": universe_report.get("coverage", 1.0) if universe_report else 1.0,
     }
     (output/"manifest.json").write_text(json.dumps(meta, indent=2)+"\n", encoding="utf-8")
     print(json.dumps({"model_dir": str(output), "holdout": result,

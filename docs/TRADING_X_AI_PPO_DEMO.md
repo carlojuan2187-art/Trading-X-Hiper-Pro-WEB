@@ -6,7 +6,7 @@
 - **No hay scanner/router ni estrategias originales decidiendo entradas/salidas en este modo.**
 - Se mantiene ledger DEMO aislado, WebSocket de book, fees, slippage, alertas, historiales, API y barreras de riesgo.
 - LIVE no se toca. El viejo método `tick()` conserva compatibilidad de pruebas, pero el worker real no lo llama.
-- Un modelo ausente, corrupto, no aprobado o con símbolos ajenos **detiene el arranque**; nunca cambia silenciosamente a las estrategias previas.
+- Un modelo ausente, corrupto, con formato erróneo o con símbolos ajenos **detiene el arranque**; nunca cambia silenciosamente a las estrategias previas. Un modelo aún no aprobado solo puede probarse en PAPER DEMO con una habilitación explícita y controlada.
 
 ## Arquitectura
 1. Offline: históricos reales 5m de Hyperliquid -> CSV continuo validado.
@@ -56,7 +56,7 @@ en todas las velas históricas (sesgo de selección). Tampoco se confunde
 preselección con aptitud de ejecución real: el spread y profundidad se validan
 por separado en el motor paper.
 
-Los archivos `models/trading_x_ppo/manifest.json`, `actor.json` y `ppo_model.zip` son artefactos del entrenamiento, NO se generan hasta correr estos comandos. El entrenador exporta `approved_for_demo=false` **siempre**, aunque la evaluación salga positiva. Requiere auditoría de calidad, replay y aprobación explícita del responsable antes de marcarlo true y entregar ambos ficheros al worker. Nunca declarar rentabilidad a partir de un único holdout.
+Los archivos `models/trading_x_ppo/manifest.json`, `actor.json` y `ppo_model.zip` son artefactos del entrenamiento, NO se generan hasta correr estos comandos. El entrenador exporta `approved_for_demo=false` **siempre**, aunque la evaluación salga positiva. Un checkpoint no aprobado puede ejecutarse en investigación estrictamente PAPER DEMO con `DEMO_AI_PAPER_RESEARCH_MODE=true`; aprobar su calidad real requiere auditoría y pruebas futuras. Nunca declarar rentabilidad a partir de un único holdout.
 
 Para un cambio de modelo, pausar nuevas entradas, dejar que terminen las posiciones actuales o confirmar la política de traspaso; el worker sigue gestionando SL/TP pero no ejecuta CLOSE de un modelo distinto al que abrió la operación.
 
@@ -141,7 +141,23 @@ DEMO_DECISION_ENGINE=ai_ppo
 DEMO_AI_MANIFEST=models/trading_x_ppo/manifest.json
 DEMO_AI_SYMBOLS=AUTO
 DEMO_AI_MAX_MARGIN_USDC=25
+# SOLO cuando se quiere recopilar feedback simulado ANTES de rentabilidad validada:
+DEMO_AI_PAPER_RESEARCH_MODE=true
 ```
+
+En modo `DEMO_AI_PAPER_RESEARCH_MODE=true`, un manifest con
+`approved_for_demo=false` puede operar **exclusivamente en el worker paper**
+si están presentes `DEMO_WORKER_MODE=true`,
+`DEMO_ENABLED=true` y `DEMO_DECISION_ENGINE=ai_ppo`. Esto responde a
+la necesidad de recopilar operaciones simuladas mientras el PPO aprende,
+sin exigirle rentabilidad prematura y sin permitir ninguna orden LIVE.
+Se siguen verificando SHA256, observaciones, pares y perfil de riesgo.
+
+**Esto NO despliega automáticamente el modelo:** hay que proporcionar
+`actor.json` y `manifest.json` al worker DEMO y comprobar que el arranque
+funcione; no cambiar `main` ni servicios productivos durante la investigación.
+No activar un modelo que haga cero operaciones sin estudiar primero su política.
+No interpretarlo como un modelo rentable.
 
 El entrenador usa por defecto 100 USDC de capital, 25 USDC de margen máximo, 10x, `POSITION_PERCENT=1.0`, 5 bps por comisión, 2 bps de slippage y 1 bp estimado de spread por lado. **Los parámetros pueden ajustarse al worker DEMO** mediante `--initial-capital`, `--margin-cap`, `--leverage`, `--position-percent`, `--taker-fee-bps`, `--slippage-bps` y `--assumed-spread-bps`. Por ejemplo, si el worker limita el margen a 3 USDC, entrena con `--margin-cap 3` y confirma que su apalancamiento, fees y `POSITION_PERCENT` coinciden. El servidor rechaza modelos con perfil incompatible; el spread real se utiliza para la ejecución DEMO y no se asume constante.
 

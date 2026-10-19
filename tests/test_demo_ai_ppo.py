@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 import time
 import unittest
+from unittest.mock import patch
 
 from app.demo.ai_ppo import (
     BAR_MS, OBS_NAMES, CandleStore, Decision, PPOPolicy, MODEL_SCHEMA,
@@ -77,6 +78,19 @@ class TestAutonomousPPO(unittest.TestCase):
             manifest.write_text(json.dumps(meta))
             with self.assertRaisesRegex(ValueError, "not approved"):
                 PPOPolicy(str(manifest))
+            # Research is strictly DEMO paper-only, explicitly opted in.
+            with patch.dict(os.environ, {"DEMO_AI_PAPER_RESEARCH_MODE": "true",
+                                         "DEMO_DECISION_ENGINE": "ai_ppo",
+                                         "DEMO_ENABLED": "true",
+                                         "DEMO_WORKER_MODE": "true"}):
+                paper_model = PPOPolicy(str(manifest))
+                self.assertTrue(paper_model.research_only)
+            with patch.dict(os.environ, {"DEMO_AI_PAPER_RESEARCH_MODE": "true",
+                                         "DEMO_DECISION_ENGINE": "ai_ppo",
+                                         "DEMO_ENABLED": "false",
+                                         "DEMO_WORKER_MODE": "true"}):
+                with self.assertRaisesRegex(ValueError, "not approved"):
+                    PPOPolicy(str(manifest))
             meta["approved_for_demo"] = True
             manifest.write_text(json.dumps(meta))
             model = PPOPolicy(str(manifest))

@@ -69,7 +69,9 @@ class TestAutonomousPPO(unittest.TestCase):
                     "action_dims":[4,3,3], "trained_symbols":["BTC"],
                     "approved_for_demo":False,
                     "runtime_profile":{"leverage":10, "position_percent":1.0,
-                                       "margin_cap_usdc":25.0},
+                                       "margin_cap_usdc":25.0, "initial_capital_usdc":100,
+                                       "taker_fee_bps":5.0, "slippage_bps":2.0,
+                                       "assumed_spread_bps":1.0},
                     "actor_file":"actor.json","actor_sha256":sha256(raw).hexdigest()}
             manifest=d/"manifest.json"
             manifest.write_text(json.dumps(meta))

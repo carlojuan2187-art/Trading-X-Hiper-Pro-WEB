@@ -29,13 +29,18 @@ TAKE_ATR = (1.2, 2.0, 3.0)
 MODEL_SCHEMA = "trading_x_ppo_v2"
 
 
-def configured_symbols() -> tuple[str, ...]:
-    raw = os.getenv("DEMO_AI_SYMBOLS", "BTC,ETH,SOL")
-    coins = tuple(dict.fromkeys(s.strip().upper() for s in raw.split(",") if s.strip()))
-    if not coins or len(coins) > 12 or any(
+def configured_symbols(trained_symbols=None) -> tuple[str, ...]:
+    """Use every trained LIVE-eligible market unless an explicit DEMO subset is set."""
+    raw = os.getenv("DEMO_AI_SYMBOLS")
+    if raw is None or raw.strip().upper() == "AUTO":
+        coins = (tuple(sorted(trained_symbols)) if trained_symbols is not None
+                 else ("BTC", "ETH", "SOL"))
+    else:
+        coins = tuple(dict.fromkeys(s.strip().upper() for s in raw.split(",") if s.strip()))
+    if not coins or len(coins) > 250 or any(
         len(s) > 25 or not s.replace("-", "").isalnum() for s in coins
     ):
-        raise ValueError("DEMO_AI_SYMBOLS inválido (máximo 12 símbolos)")
+        raise ValueError("DEMO_AI_SYMBOLS inválido (1..250 símbolos)")
     return coins
 
 

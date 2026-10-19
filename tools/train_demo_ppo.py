@@ -165,8 +165,13 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
             truncated = bool(training and self.idx-self.start >= 512)
             if done or truncated:
                 if self.pos:
+                    marked_before_exit = equity
                     self._close(bar["c"])
-                equity = self.cash
+                    equity = self.cash
+                    # Terminal reward also charges final execution costs.
+                    reward += (equity-marked_before_exit)/100.0
+                else:
+                    equity = self.cash
             info = {"equity": round(equity, 6), "trades": len(self.trades),
                     "max_drawdown": round(self.max_drawdown, 6),
                     "net_pnl": round(self.cash-100, 6)}

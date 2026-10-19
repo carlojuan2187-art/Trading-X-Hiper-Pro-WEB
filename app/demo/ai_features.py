@@ -9,6 +9,14 @@ import math
 import os
 import time
 
+def valid_quote(bid: float, ask: float) -> bool:
+    try:
+        bid, ask = float(bid), float(ask)
+        return math.isfinite(bid) and math.isfinite(ask) and 0 < bid <= ask
+    except (ValueError, TypeError, OverflowError):
+        return False
+
+
 BAR_MS = 300_000
 OBS_NAMES = (
     "return_1", "return_3", "return_12", "range_pct", "body_pct",

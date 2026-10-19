@@ -58,6 +58,8 @@ jobs:
         run: python tools/test_demo_offline.py
       - name: Chart legacy trade symbol regression
         run: node tests/test_market_terminal_aliases.cjs
+      - name: DEMO notional and fee reconciliation
+        run: node --test tests/test_demo_pnl_reconciliation.cjs
       - name: Browser script syntax
         run: |
           node --check app/web/static/app.js

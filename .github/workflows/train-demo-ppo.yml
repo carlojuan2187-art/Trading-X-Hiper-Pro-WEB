@@ -50,6 +50,12 @@ on:
 permissions:
   contents: read
 
+# One experiment per branch/PR. Superseded research jobs must not
+# multiply data API calls or consume CPU hours concurrently.
+concurrency:
+  group: ppo-live-universe-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   train-ppo:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 24

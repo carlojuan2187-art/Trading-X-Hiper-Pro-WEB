@@ -6,6 +6,7 @@ on:
       - 'app/trading_engine.py'
       - 'app/demo/simulator.py'
       - 'app/demo/ai_ppo.py'
+      - 'app/demo/ai_features.py'
       - 'tools/train_demo_ppo.py'
       - 'tools/download_ai_candles.py'
       - 'requirements-ai-train.txt'

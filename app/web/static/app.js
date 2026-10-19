@@ -2647,6 +2647,15 @@ function demoMetric(label, value) {
 function renderDemoPosition(d) {
   const p = d.position;
   if (p) {
+    // The ledger's unrealized PnL excludes entry fee because the account
+    // balance was debited at entry. Trade NET must include both trading sides.
+    const hasNet = p.unrealized_pnl_usdc != null && p.entry_fee_usdc != null
+      && Number.isFinite(Number(p.unrealized_pnl_usdc)) && Number.isFinite(Number(p.entry_fee_usdc));
+    const tradeNet = hasNet ? Number(p.unrealized_pnl_usdc) - Number(p.entry_fee_usdc) : null;
+    const feeRate = d.taker_fee_bps != null && Number.isFinite(Number(d.taker_fee_bps))
+      ? Number(d.taker_fee_bps) / 10000 : null;
+    const approximateExitFee = feeRate != null && Number(p.mark_price) > 0 && Number(p.quantity) > 0
+      ? Number(p.mark_price) * Number(p.quantity) * feeRate : null;
     elements.demoPosition.className = 'demo-position';
     elements.demoPosition.innerHTML = [
       demoMetric('Par', p.symbol), demoMetric('Dirección', p.direction.toUpperCase()),
@@ -2654,12 +2663,17 @@ function renderDemoPosition(d) {
       demoMetric('Entrada', formatNumber(p.entry_price, 6)), demoMetric('Precio observado', formatNumber(p.mark_price, 6)),
       demoMetric('Stop Loss', formatNumber(p.stop_price, 6)), demoMetric('Take Profit', formatNumber(p.target_price, 6)),
       demoMetric('Margen / Apalancamiento', `${demoCash(p.margin_usdc)} · ${p.leverage}x`),
-      demoMetric('PnL flotante (ledger)', demoCash(p.unrealized_pnl_usdc)),
+      demoMetric('Notional de entrada real', demoCash(p.notional_usdc, 5)),
+      demoMetric('PnL neto si cerrase ahora (dos fees)', tradeNet == null ? '—' : demoCash(tradeNet, 5)),
+      demoMetric('PnL flotante del ledger (fee entrada ya en saldo)', demoCash(p.unrealized_pnl_usdc, 5)),
       demoMetric('Movimiento de precio', Number(p.entry_price) > 0 && Number(p.mark_price) > 0
         ? `${((p.direction === 'short' ? -1 : 1) * (Number(p.mark_price) / Number(p.entry_price) - 1) * 100).toFixed(3)}%` : '—'),
-      demoMetric('ROE estimado sobre margen', Number(p.margin_usdc) > 0
-        ? `${(100 * Number(p.unrealized_pnl_usdc || 0) / Number(p.margin_usdc)).toFixed(3)}%` : '—'),
-      demoMetric('Comisión apertura', demoCash(p.entry_fee_usdc, 5)),
+      demoMetric('ROE NETO estimado sobre margen', Number(p.margin_usdc) > 0 && tradeNet != null
+        ? `${(100 * tradeNet / Number(p.margin_usdc)).toFixed(3)}%` : '—'),
+      demoMetric('Comisión apertura (real)', demoCash(p.entry_fee_usdc, 5)),
+      demoMetric('Comisión salida (aprox. al mark)', approximateExitFee == null ? '—' : demoCash(approximateExitFee, 5)),
+      demoMetric('Comisiones totales aprox.', approximateExitFee == null ? '—' :
+        demoCash(Number(p.entry_fee_usdc || 0) + approximateExitFee, 5)),
       demoMetric('Cantidad', formatNumber(p.quantity, 8)),
       demoMetric('Apertura', formatDate(p.opened_at)),
     ].join('');
@@ -2675,7 +2689,11 @@ function renderDemo() {
   if (!d) return;
   setPill(elements.demoStatusBadge, d.enabled ? 'Bot DEMO activo' : 'Bot DEMO pausado', d.enabled ? 'active' : 'warning');
   elements.demoEquity.textContent = demoCash(d.equity_usdc);
-  elements.demoPnl.textContent = `PnL realizado: ${demoCash(d.realized_pnl_usdc)} · Flotante: ${demoCash(d.unrealized_pnl_usdc)}`;
+  // Equity already accounts for the paid opening fee. A displayed net
+  // trade return must deduct it once, unlike unrealized PnL in the ledger.
+  const visibleNet = d.position?.entry_fee_usdc != null && d.unrealized_pnl_usdc != null
+    ? Number(d.unrealized_pnl_usdc) - Number(d.position.entry_fee_usdc) : null;
+  elements.demoPnl.textContent = `PnL realizado: ${demoCash(d.realized_pnl_usdc)} · Neto de posición (2 fees): ${visibleNet == null ? '—' : demoCash(visibleNet)}`;
   if (elements.demoCapitalInput && document.activeElement !== elements.demoCapitalInput) {
     elements.demoCapitalInput.value = Number(d.initial_equity_usdc ?? 100).toFixed(2);
   }
@@ -2806,7 +2824,8 @@ window.addEventListener('hl:market-quote', (event) => {
   account.unrealized_pnl_usdc = net;
   account.equity_usdc = Number(account.balance_usdc || 0) + net;
   elements.demoEquity.textContent = demoCash(account.equity_usdc);
-  elements.demoPnl.textContent = `PnL realizado: ${demoCash(account.realized_pnl_usdc)} · Flotante estimado: ${demoCash(net)}`;
+  const tradeNetNow = net - Number(p.entry_fee_usdc || 0); // Entry fee already debited from balance.
+  elements.demoPnl.textContent = `PnL realizado: ${demoCash(account.realized_pnl_usdc)} · Neto estimado (dos fees): ${demoCash(tradeNetNow)}`;
   renderDemoPosition(account);
 });
 

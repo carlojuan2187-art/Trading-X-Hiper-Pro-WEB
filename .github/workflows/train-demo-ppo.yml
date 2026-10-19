@@ -12,6 +12,21 @@ on:
         required: true
         default: "100000"
         type: string
+      leverage:
+        description: "Apalancamiento de investigación (igual al worker DEMO)"
+        required: true
+        default: "10"
+        type: string
+      margin_cap:
+        description: "Margen máximo USDC, compatible con MAX_TRADE_MARGIN_USDC"
+        required: true
+        default: "25"
+        type: string
+      position_percent:
+        description: "Porcentaje de saldo asignado como margen (0..1)"
+        required: true
+        default: "1.0"
+        type: string
 
 permissions:
   contents: read
@@ -39,8 +54,11 @@ jobs:
         env:
           SYMBOLS: ${{ inputs.symbols }}
           STEPS: ${{ inputs.steps }}
+          LEVERAGE: ${{ inputs.leverage }}
+          MARGIN_CAP: ${{ inputs.margin_cap }}
+          POSITION_PERCENT: ${{ inputs.position_percent }}
         run: |
-          python tools/train_demo_ppo.py --csv data/trading_x_real_5m.csv --symbols "$SYMBOLS" --steps "$STEPS" --output models/trading_x_ppo
+          python tools/train_demo_ppo.py --csv data/trading_x_real_5m.csv --symbols "$SYMBOLS" --steps "$STEPS" --leverage "$LEVERAGE" --margin-cap "$MARGIN_CAP" --position-percent "$POSITION_PERCENT" --output models/trading_x_ppo
       - name: Guardar checkpoint NO aprobado (14 días)
         uses: actions/upload-artifact@v4
         with:

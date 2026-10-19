@@ -61,7 +61,9 @@ def acquire_lease() -> bool:
 
 
 def tick(*, do_scan: bool = False, quote_provider=None, selector=None) -> dict:
-    """Single sequential pass. Selector injected for testability; zero live execution path."""
+    """Historical test adapter only. Production AI never uses this function."""
+    if AI_DEMO_MODE and do_scan:
+        raise RuntimeError("Legacy strategy tick forbidden in AI DEMO mode")
     from app import trading_engine as engine
     if quote_provider is None:
         # Compatibilidad con pruebas históricas: el servicio real NO llama tick().
@@ -157,6 +159,8 @@ class DemoMarketRunner:
         p = position or {}
         fields = (
             'id', 'symbol', 'direction', 'strategy_id', 'regime_id',
+            'decision_source', 'ai_model_version', 'ai_action_probability',
+            'ai_stop_atr', 'ai_take_atr',
             'router_decision', 'signal_score', 'scanner_score',
             'signal_reference_price', 'entry_price', 'quantity',
             'stop_price', 'initial_stop_price', 'target_price', 'rr',
@@ -407,9 +411,9 @@ class DemoMarketRunner:
             try:
                 obs, atr = observation(bars, bid, ask)
                 decision = self.ai_policy.predict(coin, obs)
-                logger.info("DEMO_AI_DECISION coin=%s action=%s model=%s prob=%.4f",
+                logger.info("DEMO_AI_DECISION coin=%s action=%s model=%s prob=%.4f sl_atr=%.2f tp_atr=%.2f",
                             coin, decision.action, decision.model_version,
-                            decision.probability)
+                            decision.probability, decision.stop_atr, decision.take_atr)
                 if decision.action in ("LONG", "SHORT"):
                     candidates.append((decision.probability, decision, atr, bars[-1]["t"]))
             except (TypeError, ValueError, ZeroDivisionError) as exc:

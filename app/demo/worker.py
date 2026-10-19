@@ -450,6 +450,10 @@ class DemoMarketRunner:
             if p.get("decision_source") != "ai_ppo_only" or _ws_coin(str(p.get("symbol",""))) != coin:
                 continue
             try:
+                if p.get("ai_model_version") != self.ai_policy.version:
+                    logger.warning("DEMO_AI_POSITION_MODEL_MISMATCH user=%s; protective SL/TP remains active",
+                                   account["_id"])
+                    continue
                 view = deepcopy(p)
                 opened = datetime.fromisoformat(p["opened_at"])
                 view["ai_bars_held"] = max(0, (last_bar + BAR_MS -
@@ -460,9 +464,15 @@ class DemoMarketRunner:
                             account["_id"], coin, action.action, action.model_version)
                 if action.action != "CLOSE":
                     continue
-                updated = update_position(account, bid, ask, force_close_reason="AI_EXIT")
+                key = (int(account["_id"]), str(p.get("id") or ""))
+                snapshot = deepcopy(account)
+                if key in self.audit_pending:
+                    snapshot["position"].update(self.audit_pending[key])
+                updated = update_position(snapshot, bid, ask, force_close_reason="AI_EXIT")
                 if updated and not updated.get("position"):
                     saved = ledger.save(account, updated)
+                    self.audit_pending.pop(key, None)
+                    self.audit_flush_at.pop(key, None)
                     self.trace_trade("AI_CLOSED", int(account["_id"]), saved["history"][-1],
                                      model=action.model_version)
                     closed += 1
@@ -683,6 +693,11 @@ async def async_main() -> None:
         raise SystemExit('DEMO_WORKER_MODE=true requerido en servicio worker dedicado')
     if DEMO_DECISION_ENGINE != "ai_ppo":
         raise SystemExit("DEMO_DECISION_ENGINE=ai_ppo required: legacy strategies disabled")
+    # Validate approved model before starting the reconnect loop.
+    manifest = os.getenv("DEMO_AI_MANIFEST", "models/trading_x_ppo/manifest.json")
+    policy = PPOPolicy(manifest)
+    if not set(configured_symbols()).issubset(policy.symbols):
+        raise SystemExit("DEMO_AI_SYMBOLS not present in approved model")
     ledger.COLLECTION.create_index('enabled')
     ledger.COLLECTION.create_index('position.symbol')
     from app.config import SCAN_INTERVAL, SCANNER_MIN_TOP_BOOK_NOTIONAL

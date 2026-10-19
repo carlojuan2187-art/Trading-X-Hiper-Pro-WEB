@@ -24,6 +24,7 @@ from app.config import (
 )
 from app.demo.simulator import valid_quote, fill_price, fee_usdc, _money, _quantity
 from app.demo.ledger import now_iso
+from app.demo.ai_experience import clean_observation
 from app.demo.settings import DEMO_TAKER_FEE_BPS, DEMO_SLIPPAGE_BPS
 
 from app.demo.ai_features import (
@@ -124,7 +125,9 @@ def ai_gate(account: dict) -> str | None:
 
 
 def open_ai_position(account: dict, decision: Decision, bid: float, ask: float,
-                     atr: float, *, rejection: dict | None = None) -> dict | None:
+                     atr: float, *, rejection: dict | None = None,
+                     entry_observation: list[float] | None = None,
+                     decision_candle_ms: int | None = None) -> dict | None:
     """AI supplies all trade choices. Safety envelope cannot choose trades."""
     def reject(code):
         if rejection is not None:
@@ -185,6 +188,13 @@ def open_ai_position(account: dict, decision: Decision, bid: float, ask: float,
         "audit_last_quote_at": now_iso(), "audit_max_quote_gap_seconds": 0.0,
         "audit_quote_gaps_over_10s": 0,
     }
+    # Exact observed state/action are kept in paper trade history so that
+    # later CLOSED outcome provides real learning feedback, never a made-up label.
+    if entry_observation is not None:
+        if decision_candle_ms is None or int(decision_candle_ms) % BAR_MS:
+            return reject("INVALID_AI_DECISION_CANDLE")
+        new["position"]["ai_entry_observation"] = clean_observation(entry_observation)
+        new["position"]["ai_decision_candle_ms"] = int(decision_candle_ms)
     new["position_open"] = True
     new["last_signal_at"] = now_iso()
     new["last_entry_at"] = now_iso()

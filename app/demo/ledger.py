@@ -83,6 +83,25 @@ def save(previous: dict, updated: dict) -> dict:
             queue_transition(previous, new_doc)
         except Exception:
             logger.exception('DEMO trade guardado pero el aviso Telegram no pudo encolarse user=%s', previous['_id'])
+    # Persist one sanitized, deduplicated learning sample only AFTER successful
+    # CAS closure. Failures are diagnosed but NEVER roll back the paper trade.
+    if previous.get('position') and new_doc.get('position') is None:
+        from app.demo.ai_experience import build_closed_experience
+        closed = (new_doc.get('history') or [None])[-1]
+        if isinstance(closed, dict):
+            experience = build_closed_experience(closed)
+            if experience:
+                try:
+                    db['demo_ai_experiences'].update_one(
+                        {'_id': experience['_id']},
+                        {'$setOnInsert': experience}, upsert=True)
+                    logger.info('DEMO_AI_EXPERIENCE_RECORDED trade=%s coin=%s model=%s pnl_net_usdc=%.6f',
+                                closed.get('id'), experience['symbol'],
+                                experience['model_version'], experience['pnl_net_usdc'])
+                except Exception:
+                    logger.exception('DEMO_AI_EXPERIENCE_PERSIST_FAILED trade=%s', closed.get('id'))
+            elif closed.get('decision_source') == 'ai_ppo_only':
+                logger.warning('DEMO_AI_EXPERIENCE_NOT_RECORDABLE trade=%s missing_entry_state', closed.get('id'))
     return new_doc
 
 

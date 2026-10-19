@@ -53,9 +53,9 @@ def observation(candles: list[dict], bid: float, ask: float,
     highs = [float(c["h"]) for c in bars]
     lows = [float(c["l"]) for c in bars]
     volumes = [float(c["v"]) for c in bars]
-    if any(not all(map(math.isfinite, row)) or min(o, h, l, c) <= 0
+    if any(not all(map(math.isfinite, (o, h, l, c, v))) or min(o, h, l, c) <= 0
            or l > min(o, c) or h < max(o, c) or v < 0
-           for row in zip(opens, highs, lows, closes, volumes)):
+           for o, h, l, c, v in zip(opens, highs, lows, closes, volumes)):
         raise ValueError("invalid_candles")
     close = closes[-1]
     tr = [max(highs[i]-lows[i], abs(highs[i]-closes[i-1]),

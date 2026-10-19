@@ -610,6 +610,12 @@ class DemoMarketRunner:
                 raise RuntimeError('La réplica DEMO no es el líder')
             if AI_DEMO_MODE:
                 await asyncio.to_thread(self.bootstrap_ai_candles)
+                # Recover closed AI examples whose asynchronous archive previously
+                # failed; read-only on accounts, idempotent upsert on private AI store.
+                from app.demo.ai_experience import backfill_closed_experiences
+                asyncio.create_task(asyncio.to_thread(
+                    backfill_closed_experiences, ledger.COLLECTION,
+                    db['demo_ai_experiences']))
             await self.subscribe_new(ws)
             # Once per successful leader start: bounded read-only 1m replay
             # of the five most recent retained DEMO closes.

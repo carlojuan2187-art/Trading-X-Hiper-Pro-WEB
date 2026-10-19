@@ -33,6 +33,8 @@ def load_csv(path: Path, symbol: str) -> list[dict]:
     rows.sort(key=lambda item: item["t"])
     if len(rows) < 1500:
         raise ValueError("Provide >=1500 REAL, continuous closed candles for this symbol")
+    if any(row["t"] % BAR_MS != 0 for row in rows):
+        raise ValueError("Candle timestamps must be 5-minute aligned")
     if len(set(r["t"] for r in rows)) != len(rows):
         raise ValueError("duplicate_candle")
     if any(b["t"] - a["t"] != BAR_MS for a, b in zip(rows, rows[1:])):

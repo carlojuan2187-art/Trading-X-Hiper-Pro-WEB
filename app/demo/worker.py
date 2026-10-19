@@ -23,15 +23,14 @@ from app.demo.credentials import user_ready
 from app.demo.market_events import decode_book
 from app.demo.simulator import open_position, update_position, entry_gate_reason
 from app.hyperliquid_client import norm_coin
-from app.demo.ai_ppo import (
-    BAR_MS, CandleStore, PPOPolicy, configured_symbols, observation,
-    ai_gate, open_ai_position,
-)
+from app.demo.ai_features import BAR_MS, CandleStore, configured_symbols, observation
 
-# Explicit switch; when active, legacy strategy decisions are unreachable.
-# An absent, unapproved or corrupt model makes startup FAIL CLOSED.
+# Load AI trading modules ONLY when this runtime enables the AI engine.
+# The legacy offline test harness intentionally stubs app.config.
 DEMO_DECISION_ENGINE = os.getenv("DEMO_DECISION_ENGINE", "ai_ppo").strip().lower()
 AI_DEMO_MODE = DEMO_DECISION_ENGINE == "ai_ppo"
+if AI_DEMO_MODE:
+    from app.demo.ai_ppo import PPOPolicy, ai_gate, open_ai_position
 
 
 def _ws_coin(symbol: str) -> str:

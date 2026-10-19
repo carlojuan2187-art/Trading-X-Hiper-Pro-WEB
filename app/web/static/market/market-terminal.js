@@ -5,6 +5,7 @@
 // Un único motor determinista en PC y móvil: la carga CDN causaba dos APIs distintas
 // y a veces inicializaba KLineCharts, a veces el fallback incompleto.
 import { init, registerOverlay } from './chart-local.js';
+import { reconcileDemoQuote } from './demo-pnl.mjs';
 
 const WS_URL = 'wss://api.hyperliquid.xyz/ws';
 const FRAMES = {
@@ -610,17 +611,46 @@ class Terminal {
       const px = market > 0 ? market : Number(this.assetContext?.markPx);
       const movementPct = entry > 0 && px > 0 ? d * ((px / entry) - 1) * 100 : null;
       const estimatedGross = px > 0 && qty > 0 ? d * (px - entry) * qty : null;
-      // Estimación antes de comisiones de cierre y funding. No sustituye al ledger.
+      // In DEMO the *old* comparison mixed live gross PnL with a ledger
+      // snapshot from another moment. It looked like a 990-USDC fee on 250.
+      // Every projected value below uses the SAME current bid/ask, actual qty,
+      // the entry fee already paid and the configured exit fee/slippage.
+      const demoQuote = this.mode === 'DEMO' && this.book?.bids?.length && this.book?.asks?.length
+        ? reconcileDemoQuote(a,
+            { bid: this.book.bids[0].price, ask: this.book.asks[0].price },
+            { feeBps: this.overlayData?.demo_taker_fee_bps,
+              slippageBps: this.overlayData?.demo_slippage_bps }) : null;
       const grossRoe = estimatedGross != null && margin > 0 ? estimatedGross / margin * 100 : null;
-      const pnl = Number.isFinite(Number(a.unrealized_pnl_usdc)) ? Number(a.unrealized_pnl_usdc) : null;
+      const pnl = a.unrealized_pnl_usdc != null && Number.isFinite(Number(a.unrealized_pnl_usdc))
+        ? Number(a.unrealized_pnl_usdc) : null;
       cells.push(
         ['Operación', `${a.direction} · ${a.strategy || 'BOT'} · ${leverage > 0 ? `${leverage}x` : '—'}`],
         ['Precio de entrada', fmt(entry, 7)], ['Precio actual (bid/ask)', fmt(px, 7)],
         ['Stop Loss', fmt(a.stop_price, 7)], ['Take Profit', fmt(a.target_price, 7)],
         ['Variación de precio', movementPct == null ? '—' : `${fmt(movementPct, 4)}%`],
-        ['ROE bruto estimado (en vivo)', grossRoe == null ? '—' : `${fmt(grossRoe, 3)}%`],
-        ['PnL bruto estimado (en vivo)', estimatedGross == null ? '—' : `${fmt(estimatedGross, 5)} USDC`],
-        ['PnL registrado', pnl == null ? '—' : `${fmt(pnl, 5)} USDC`],
+      );
+      if (this.mode === 'DEMO') {
+        cells.push(
+          ['Notional real (entrada)', demoQuote ? `${fmt(demoQuote.entryNotional, 5)} USDC` : Number(a.notional_usdc) > 0 ? `${fmt(a.notional_usdc, 5)} USDC` : '—'],
+          ['PnL bruto estimado (mismo book)', demoQuote ? `${fmt(demoQuote.gross, 5)} USDC` : 'Esperando cotización'],
+          ['Fee entrada (pagada)', a.entry_fee_usdc != null ? `${fmt(a.entry_fee_usdc, 5)} USDC` : '—'],
+          ['Fee salida (estimada)', demoQuote ? `${fmt(demoQuote.exitFee, 5)} USDC` : 'Esperando cotización'],
+          ['Fees totales (mismo notional)', demoQuote ? `${fmt(demoQuote.feesTotal, 5)} USDC` : '—'],
+          ['PnL NETO si cerrase ahora', demoQuote ? `${fmt(demoQuote.net, 5)} USDC` : 'Esperando cotización'],
+          ['ROE neto estimado (margen)', demoQuote && margin > 0 ? `${fmt(100 * demoQuote.net / margin, 3)}%` : '—'],
+          ['Modelo de costes (por lado)', this.overlayData?.demo_taker_fee_bps != null
+            ? `${fmt(this.overlayData.demo_taker_fee_bps, 2)} bps de comisión + ${fmt(this.overlayData.demo_slippage_bps, 2)} bps de slippage en salida` : '—'],
+          ['PnL ledger (otro instante, excluye fee entrada)', pnl == null ? '—' : `${fmt(pnl, 5)} USDC`],
+        );
+      } else {
+        // Preserve existing LIVE terminal computation, labels and behaviour.
+        cells.push(
+          ['ROE bruto estimado (en vivo)', grossRoe == null ? '—' : `${fmt(grossRoe, 3)}%`],
+          ['PnL bruto estimado (en vivo)', estimatedGross == null ? '—' : `${fmt(estimatedGross, 5)} USDC`],
+          ['PnL registrado', pnl == null ? '—' : `${fmt(pnl, 5)} USDC`],
+        );
+      }
+      cells.push(
         ['Margen', margin > 0 ? `${fmt(margin, 4)} USDC` : '—'],
         ['Exposición', Number(a.notional_usdc) > 0 ? `${fmt(a.notional_usdc, 4)} USDC` : '—'],
         ['Cantidad', qty > 0 ? fmt(qty, 8) : '—'],

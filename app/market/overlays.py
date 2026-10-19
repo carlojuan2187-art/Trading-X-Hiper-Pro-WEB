@@ -105,4 +105,11 @@ def project_account(account: dict | None, *, mode: str) -> dict:
     active = project(account['position'], mode=mode, closed=False) if account.get('position') else None
     history = [result for item in account.get('history', [])[-100:]
                if (result := project(item, mode=mode, closed=True)) is not None]
-    return {'mode': mode, 'active': active, 'history': list(reversed(history))}
+    result = {'mode': mode, 'active': active, 'history': list(reversed(history))}
+    if mode == 'DEMO':
+        # Explicit model rates for a single-book quote reconciliation in the
+        # frontend. No credentials and no LIVE fee or execution changes.
+        from app.demo.settings import DEMO_TAKER_FEE_BPS, DEMO_SLIPPAGE_BPS
+        result['demo_taker_fee_bps'] = DEMO_TAKER_FEE_BPS
+        result['demo_slippage_bps'] = DEMO_SLIPPAGE_BPS
+    return result

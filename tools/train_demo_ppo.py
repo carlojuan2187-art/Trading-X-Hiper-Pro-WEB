@@ -246,6 +246,7 @@ def main():
     ap.add_argument("--taker-fee-bps", type=float, default=5)
     ap.add_argument("--slippage-bps", type=float, default=2)
     ap.add_argument("--assumed-spread-bps", type=float, default=1)
+    ap.add_argument("--resume-model", default="", help="Trusted prior training artifact directory containing ppo_model.zip and manifest.json")
     ap.add_argument("--demo-feedback", default="", help="PRIVATE JSONL of closed PPO DEMO experiences (never GitHub)")
     ap.add_argument("--min-feedback-trades", type=int, default=30)
     args = ap.parse_args()
@@ -298,18 +299,31 @@ def main():
     test = {symbol: rows[int(len(rows)*0.75)-40:] for symbol, rows in datasets.items()}
     env = environment(train, training=True, profile=profile)
     check_env(env)
-    model = PPO("MlpPolicy", env, verbose=1, seed=17, device="cpu",
-                learning_rate=1e-4, ent_coef=0.01, n_steps=1024,
-                batch_size=256, gamma=0.995, gae_lambda=0.97,
-                policy_kwargs={"net_arch": {"pi": [32, 32], "vf": [32, 32]},
-                               "activation_fn": torch.nn.Tanh})
+    parent_version = None
+    if args.resume_model:
+        from tools.ppo_checkpoint import verified_checkpoint
+        checkpoint_path, parent = verified_checkpoint(args.resume_model, profile)
+        model = PPO.load(str(checkpoint_path), env=env, device="cpu")
+        if (getattr(model.observation_space, "shape", ()) != (len(OBS_NAMES),)
+                or list(model.action_space.nvec) != [4, 3, 3]):
+            raise ValueError("INCOMPATIBLE_PREVIOUS_PPO_ACTION_OBSERVATION")
+        parent_version = str(parent["version"])
+        print(f"RESUMED_PPO_TRAINING trusted_parent={parent_version} parent_steps={parent.get('steps')}",
+              flush=True)
+    else:
+        model = PPO("MlpPolicy", env, verbose=1, seed=17, device="cpu",
+                    learning_rate=1e-4, ent_coef=0.01, n_steps=1024,
+                    batch_size=256, gamma=0.995, gae_lambda=0.97,
+                    policy_kwargs={"net_arch": {"pi": [32, 32], "vf": [32, 32]},
+                                   "activation_fn": torch.nn.Tanh})
     # Balanced 512-bar episodes, at least 2 training episodes per eligible
     # asset. A large LIVE pool must NEVER be silently under-sampled by a fixed
     # 20k-step BTC/ETH/SOL benchmark or random-symbol resets.
     effective_steps = max(args.steps, len(symbols) * 512 * 2)
     print(f"TRAINING_COVERAGE symbols={len(symbols)} requested_steps={args.steps} "
           f"effective_steps={effective_steps} min_episodes_per_symbol=2", flush=True)
-    model.learn(total_timesteps=effective_steps)
+    model.learn(total_timesteps=effective_steps,
+                reset_num_timesteps=not bool(args.resume_model))
     feedback_summary = {"samples": 0, "applied": False, "reason": "no_private_feedback_supplied"}
     if args.demo_feedback:
         from tools.ppo_demo_feedback import load_feedback, refine_actor_with_closed_feedback
@@ -355,13 +369,22 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     raw = json.dumps(actor, separators=(",", ":"), allow_nan=False).encode()
     (output/"actor.json").write_bytes(raw)
+    # Full checkpoint includes actor, critic and optimiser state for continued
+    # training on future historical data + DEMO feedback. NEVER load in Railway.
+    checkpoint_file = output/"ppo_model.zip"
+    model.save(str(checkpoint_file))
+    checkpoint_digest = sha256(checkpoint_file.read_bytes()).hexdigest()
     meta = {
         "schema": MODEL_SCHEMA, "version": f"ppo-{int(time.time())}",
         "observation_names": list(OBS_NAMES), "action_dims": [4, 3, 3],
         "actor_file": "actor.json", "actor_sha256": sha256(raw).hexdigest(),
         "trained_symbols": list(symbols), "approved_for_demo": False,
         "training_candles": {s: len(b) for s, b in train.items()}, "holdout": result,
-        "training_algorithm": "PPO", "steps": effective_steps,
+        "training_algorithm": "PPO", "steps": int(model.num_timesteps),
+        "current_run_steps": effective_steps,
+        "parent_version": parent_version,
+        "training_checkpoint_file": "ppo_model.zip",
+        "training_checkpoint_sha256": checkpoint_digest,
         "requested_steps": args.steps,
         "symbol_sampling": "balanced_round_robin_512_bar_episodes",
         "reward_contract": "scaled_log_equity_return_minus_incremental_drawdown_v1",

@@ -60,6 +60,9 @@ def environment(datasets: dict[str, list[dict]], *, training: bool,
             self.observation_space = spaces.Box(low=-3, high=3,
                                                 shape=(len(OBS_NAMES),), dtype=np.float32)
             self.random = random.Random(seed)
+            self.symbol_rotation = list(datasets)
+            self.rotation_index = 0
+            self.random.shuffle(self.symbol_rotation)
             self.initial = float(profile["initial_capital_usdc"])
             self.price_impact = (float(profile["slippage_bps"]) +
                                  float(profile["assumed_spread_bps"])) / 10000
@@ -101,7 +104,14 @@ def environment(datasets: dict[str, list[dict]], *, training: bool,
 
         def reset(self, *, seed=None, options=None):
             super().reset(seed=seed)
-            self.rows = datasets[self.random.choice(tuple(datasets))] if training else next(iter(datasets.values()))
+            if training:
+                if self.rotation_index and self.rotation_index % len(self.symbol_rotation) == 0:
+                    self.random.shuffle(self.symbol_rotation)
+                coin = self.symbol_rotation[self.rotation_index % len(self.symbol_rotation)]
+                self.rotation_index += 1
+                self.rows = datasets[coin]
+            else:
+                self.rows = next(iter(datasets.values()))
             rows = self.rows
             if training and len(rows) > 700:
                 self.idx = self.random.randrange(40, len(rows)-512)
@@ -276,7 +286,13 @@ def main():
     model = PPO("MlpPolicy", env, verbose=1, seed=17, device="cpu",
                 policy_kwargs={"net_arch": {"pi": [32, 32], "vf": [32, 32]},
                                "activation_fn": torch.nn.Tanh})
-    model.learn(total_timesteps=args.steps)
+    # Balanced 512-bar episodes, at least 2 training episodes per eligible
+    # asset. A large LIVE pool must NEVER be silently under-sampled by a fixed
+    # 20k-step BTC/ETH/SOL benchmark or random-symbol resets.
+    effective_steps = max(args.steps, len(symbols) * 512 * 2)
+    print(f"TRAINING_COVERAGE symbols={len(symbols)} requested_steps={args.steps} "
+          f"effective_steps={effective_steps} min_episodes_per_symbol=2", flush=True)
+    model.learn(total_timesteps=effective_steps)
     result = {symbol: evaluate_one(model, rows, profile) for symbol, rows in test.items()}
     policy = model.policy
     def layer(module):
@@ -298,7 +314,9 @@ def main():
         "actor_file": "actor.json", "actor_sha256": sha256(raw).hexdigest(),
         "trained_symbols": list(symbols), "approved_for_demo": False,
         "training_candles": {s: len(b) for s, b in train.items()}, "holdout": result,
-        "training_algorithm": "PPO", "steps": args.steps,
+        "training_algorithm": "PPO", "steps": effective_steps,
+        "requested_steps": args.steps,
+        "symbol_sampling": "balanced_round_robin_512_bar_episodes",
         "runtime_profile": profile,
         "universe_source": universe_report.get("source") if universe_report else "EXPLICIT_SYMBOLS",
         "universe_snapshot_timestamp_ms": (universe_report.get("snapshot_timestamp_ms")

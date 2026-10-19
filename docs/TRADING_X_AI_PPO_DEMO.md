@@ -45,7 +45,7 @@ DEMO_AI_SYMBOLS=BTC,ETH,SOL
 DEMO_AI_MAX_MARGIN_USDC=25
 ```
 
-El primer entrenador usa el perfil explícito: 100 USDC de capital, margen máximo 25 USDC, 10x, POSITION_PERCENT=1.0, 5 bps por comisión y 2 bps de slippage más 1 bp aproximado de spread por lado. Por seguridad la carga del modelo **rechaza** una configuración que no coincida con el perfil (incluido `MAX_TRADE_MARGIN_USDC`, que debe ser 0 o al menos 25). Si la configuración real difiere, hay que adaptar el simulador de entrenamiento y volver a entrenar antes de aprobarlo. El spread real nunca se asume constante en el worker.
+El entrenador usa por defecto 100 USDC de capital, 25 USDC de margen máximo, 10x, `POSITION_PERCENT=1.0`, 5 bps por comisión, 2 bps de slippage y 1 bp estimado de spread por lado. **Los parámetros pueden ajustarse al worker DEMO** mediante `--initial-capital`, `--margin-cap`, `--leverage`, `--position-percent`, `--taker-fee-bps`, `--slippage-bps` y `--assumed-spread-bps`. Por ejemplo, si el worker limita el margen a 3 USDC, entrena con `--margin-cap 3` y confirma que su apalancamiento, fees y `POSITION_PERCENT` coinciden. El servidor rechaza modelos con perfil incompatible; el spread real se utiliza para la ejecución DEMO y no se asume constante.
 
 Build: `pip install -r requirements.txt`
 Start: `python -m app.demo.worker`

@@ -24,7 +24,7 @@ from app.config import (
 )
 from app.demo.simulator import valid_quote, fill_price, fee_usdc, _money, _quantity
 from app.demo.ledger import now_iso
-from app.demo.settings import DEMO_TAKER_FEE_BPS
+from app.demo.settings import DEMO_TAKER_FEE_BPS, DEMO_SLIPPAGE_BPS
 
 from app.demo.ai_features import (
     BAR_MS, OBS_NAMES, ACTIONS, STOP_ATR, TAKE_ATR, MODEL_SCHEMA,
@@ -67,6 +67,15 @@ class PPOPolicy:
             raise ValueError("PPO model not approved for demo")
         if meta.get("action_dims") != [4, 3, 3]:
             raise ValueError("PPO action schema mismatch")
+        cap = float(os.getenv("DEMO_AI_MAX_MARGIN_USDC", "25"))
+        effective_cap = min(cap, MAX_TRADE_MARGIN_USDC) if MAX_TRADE_MARGIN_USDC > 0 else cap
+        profile = meta.get("runtime_profile")
+        if (not isinstance(profile, dict) or
+            profile.get("leverage") != LEVERAGE or
+            float(profile.get("position_percent", -1)) != POSITION_PERCENT or
+            float(profile.get("margin_cap_usdc", -1)) != effective_cap or
+            DEMO_TAKER_FEE_BPS != 5.0 or DEMO_SLIPPAGE_BPS != 2.0):
+            raise ValueError("AI training/runtime risk profile mismatch: retrain before deploy")
         filename = meta.get("actor_file")
         if filename != "actor.json":
             raise ValueError("actor filename forbidden")

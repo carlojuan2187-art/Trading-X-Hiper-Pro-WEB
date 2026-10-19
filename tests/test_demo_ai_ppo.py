@@ -8,7 +8,8 @@ import os
 os.environ.setdefault("DEMO_WORKER_MODE", "true")
 os.environ.setdefault("DEMO_ENABLED", "true")
 os.environ.setdefault("ADMIN_TELEGRAM_ID", "1")
-os.environ.setdefault("MONGO_URL", "mongodb://127.0.0.1:27017")
+os.environ.setdefault("MONGO_URL", "mongodb://127.0.0.1:27017/?serverSelectionTimeoutMS=1000")
+os.environ.setdefault("WEBAPP_SESSION_SECRET", "offline-test-session-secret-independent")
 import tempfile
 from pathlib import Path
 import time

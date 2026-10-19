@@ -60,6 +60,61 @@ Los archivos `models/trading_x_ppo/manifest.json` y `actor.json` son artefactos 
 
 Para un cambio de modelo, pausar nuevas entradas, dejar que terminen las posiciones actuales o confirmar la política de traspaso; el worker sigue gestionando SL/TP pero no ejecuta CLOSE de un modelo distinto al que abrió la operación.
 
+## Aprendizaje continuado desde operaciones DEMO cerradas (sin acceso LIVE)
+
+**El objetivo es que los cierres de la propia IA se conviertan en datos de
+aprendizaje, no que se pierdan ni se sustituyan por señales algorítmicas.**
+
+1. Cuando PPO abre una operación paper, el worker almacena la observación
+   real de 13 variables, dirección, sello de vela y versión del modelo.
+2. Cuando se cierra por TP, SL o CLOSE de PPO, `app.demo.ledger.save` guarda
+   el trade con CAS y después archiva un registro idempotente en la colección
+   privada `demo_ai_experiences`. No se guarda ninguna clave, token ni
+   identificador de usuario. Fallar al archivar nunca retrasa un cierre.
+3. En un host de entrenamiento seguro, con `MONGO_URL` y `MONGO_DB_NAME`,
+   exporta el registro acumulativo SIN subirlo a GitHub:
+
+```bash
+python -m tools.export_demo_ai_experiences --output private/demo_experiences_001.jsonl
+```
+
+4. Reentrena el PPO en los históricos reales actualizados, con el **universo
+   LIVE elegible**, y añade el aprendizaje auxiliar de las operaciones DEMO:
+
+```bash
+python -m tools.download_ai_candles --universe live --days 16 --output data/trading_x_real_5m.csv --report data/trading_x_live_universe.json
+python -m tools.train_demo_ppo --symbols auto --csv data/trading_x_real_5m.csv --universe-report data/trading_x_live_universe.json --steps 250000 --demo-feedback private/demo_experiences_001.jsonl --min-feedback-trades 30 --output models/trading_x_ppo
+```
+
+**Importante:** PPO es `on-policy` y no es válido fingir que operaciones
+anteriores son trayectorias `on-policy` del modelo actual. El nuevo
+`ppo_demo_feedback.py` usa un **ajuste auxiliar off-policy, conservador,
+basado en PnL neto real y penalizado por divergencia KL**: refuerza con
+moderación acciones rentables y reduce el peso de acciones con pérdidas.
+Al menos 30 trades AI cerrados válidos son necesarios antes de aplicarlo;
+mientras haya menos, se preservan sin inventar feedback ni forzar operaciones.
+El PPO continúa entrenándose en el simulador histórico normal.
+
+El informe marca cualquier solapamiento de experiencias DEMO con el holdout
+histórico. Si existe, **la evaluación deja de ser prospectiva** y no puede
+aprobar el modelo; requiere nuevas velas futuras sin contaminación.
+No hay aprobado automático ni garantía de mejora de rentabilidad.
+
+El workflow público de GitHub Actions solo entrena desde datos públicos.
+**Nunca se suministran allí secretos de Mongo ni los registros privados**.
+El refinamiento privado es una capacidad implementada, pero su ciclo
+programado/despliegue en un entorno seguro se debe configurar por separado.
+No se instalará PyTorch en el worker que gestiona SL/TP.
+
+### Qué permanece sin cambiar
+
+- DEMO sigue siendo un entorno paper, sin órdenes reales.
+- PPO toma decisiones de entrada/salida; no vuelve el router algorítmico.
+- Si un candidato nuevo falla la calidad o no tiene suficientes operaciones,
+  **no se sustituye automáticamente un modelo PPO anterior que esté
+  funcionando**. Se conservan los registros de aprendizaje y el historial.
+- LIVE continúa sin cambios. No se resetean estadísticas para ocultar pérdidas.
+
 ## Configuración del servicio DEMO (NO LIVE)
 Conserva variables actuales `MONGO_URL`, `MONGO_DB_NAME`, `ADMIN_TELEGRAM_ID`, `DEMO_ENABLED=true`, `DEMO_WORKER_MODE=true`, `HYPERLIQUID_WS_URL`. Agrega:
 
@@ -86,7 +141,7 @@ Replica: 1 (el lease de Mongo evita colisiones). Asegura que `actor.json` y `man
 ## Limitaciones reconocidas
 - Las pruebas PPO de BTC/ETH/SOL iniciales no prueban rentabilidad ni cobertura LIVE. Los modelos de investigación generados en GitHub Actions permanecen no aprobados y se almacenan como artifacts, no como archivos comprometidos en el repositorio.
 - PPO no garantiza ganancias, el simulador OHLCV no replica ordenes parcialmente llenadas, book completo ni gaps de la cuenta real.
-- Entrenamiento offline por versiones, no aprendizaje incremental por operación cerrada en producción: el reentrenamiento con resultados DEMO es una fase posterior con controles contra overfitting y contaminación del holdout.
+- Las operaciones DEMO cerradas pueden alimentar el refinamiento privado off-policy del PPO; el reentrenamiento recurrente automático y su entrega segura a Railway aún no están configurados ni desplegados. Se exige comprobación fuera de muestra posterior a esos cierres.
 - El retorno se mide con net PnL, profit factor, max drawdown y número de trades. Resultados con pocas operaciones no acreditan mejora estadística.
 - `DEMO_AI_SYMBOLS=AUTO` (o variable ausente) usa todos los mercados entrenados y aprobados incluidos en el manifest. La lista se congela por versión del modelo, con un límite técnico de 250, y requiere observar carga de WebSocket, REST inicial y recursos del worker antes de activarse. Un símbolo nuevo no entrenado no puede operar sin un nuevo checkpoint aprobado. Puede restringirse a un subconjunto explícito, pero ya no se vuelve silenciosamente a BTC/ETH/SOL.
 - El universo LIVE elegible rota con el tiempo y la ventana histórica de Hyperliquid limita las velas M5 recientes disponibles. Ampliar la cobertura y el historial es distinto de garantizar ventaja predictiva.

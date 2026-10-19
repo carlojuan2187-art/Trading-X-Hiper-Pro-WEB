@@ -1,9 +1,5 @@
 name: Entrenar IA PPO DEMO (manual)
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/train-demo-ppo.yml'
-      - 'tools/train_demo_ppo.py'
   workflow_dispatch:
     inputs:
       symbols:

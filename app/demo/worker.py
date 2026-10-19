@@ -134,10 +134,10 @@ class DemoMarketRunner:
     def __init__(self):
         self.subscribed: set[str] = set()
         self.candle_subscribed: set[str] = set()
-        self.ai_universe = configured_symbols() if AI_DEMO_MODE else ()
         self.ai_policy = (PPOPolicy(os.getenv(
             "DEMO_AI_MANIFEST", "models/trading_x_ppo/manifest.json"))
             if AI_DEMO_MODE else None)
+        self.ai_universe = (configured_symbols(self.ai_policy.symbols) if self.ai_policy else ())
         if self.ai_policy and not set(self.ai_universe).issubset(self.ai_policy.symbols):
             raise RuntimeError("AI DEMO symbols absent from trained model; refuse legacy fallback")
         self.ai_market = CandleStore() if AI_DEMO_MODE else None
@@ -699,8 +699,11 @@ async def async_main() -> None:
     # Validate approved model before starting the reconnect loop.
     manifest = os.getenv("DEMO_AI_MANIFEST", "models/trading_x_ppo/manifest.json")
     policy = PPOPolicy(manifest)
-    if not set(configured_symbols()).issubset(policy.symbols):
+    runtime_coins = configured_symbols(policy.symbols)
+    if not set(runtime_coins).issubset(policy.symbols):
         raise SystemExit("DEMO_AI_SYMBOLS not present in approved model")
+    logger.info("DEMO_AI_UNIVERSE trained=%s active=%s coins=%s",
+                len(policy.symbols), len(runtime_coins), ",".join(runtime_coins))
     ledger.COLLECTION.create_index('enabled')
     ledger.COLLECTION.create_index('position.symbol')
     from app.config import SCAN_INTERVAL, SCANNER_MIN_TOP_BOOK_NOTIONAL

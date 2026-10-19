@@ -78,6 +78,8 @@ def environment(datasets: dict[str, list[dict]], *, training: bool,
             self.peak = self.initial
             self.trades = []
             self.max_drawdown = 0.0
+            self.flat_action_counts = [0, 0, 0, 0]
+            self.position_action_counts = [0, 0, 0, 0]
 
         def _mark(self, px):
             if self.pos is None:
@@ -123,6 +125,8 @@ def environment(datasets: dict[str, list[dict]], *, training: bool,
             self.max_drawdown = 0.0
             self.pos = None
             self.trades = []
+            self.flat_action_counts = [0, 0, 0, 0]
+            self.position_action_counts = [0, 0, 0, 0]
             return self._obs(), {}
 
         def _close(self, px):
@@ -141,6 +145,8 @@ def environment(datasets: dict[str, list[dict]], *, training: bool,
             rows = self.rows
             bar = rows[self.idx]
             before = self._mark(rows[self.idx-1]["c"])
+            previous_drawdown = max(0, 1-before/max(self.peak, 1e-9))
+            (self.position_action_counts if self.pos else self.flat_action_counts)[act] += 1
             px = bar["o"]
             if self.pos and act == 3:
                 self._close(px)
@@ -179,7 +185,12 @@ def environment(datasets: dict[str, list[dict]], *, training: bool,
             self.peak = max(self.peak, equity)
             drawdown = max(0, 1-equity/self.peak) if self.peak > 0 else 1
             self.max_drawdown = max(self.max_drawdown, drawdown)
-            reward = (equity-before)/self.initial - drawdown*0.0004
+            # Log equity return is scaled for PPO optimizer, but still comes
+            # only from ACTUAL simulated PnL (fees, stops and slippage included).
+            # Penalize INCREASES in drawdown, not perpetual time spent in DD.
+            # No fake bonus for taking trades; WAIT remains legitimate.
+            reward = (100.0*math.log(max(equity, 1e-9)/max(before, 1e-9))
+                      - 2.0*max(0, drawdown-previous_drawdown))
             self.idx += 1
             done = self.idx >= len(rows)-1 or equity < self.initial*0.2
             truncated = bool(training and self.idx-self.start >= 512)
@@ -189,7 +200,7 @@ def environment(datasets: dict[str, list[dict]], *, training: bool,
                     self._close(bar["c"])
                     equity = self.cash
                     # Terminal reward also charges final execution costs.
-                    reward += (equity-marked_before_exit)/self.initial
+                    reward += 100.0*math.log(max(equity, 1e-9)/max(marked_before_exit, 1e-9))
                 else:
                     equity = self.cash
             info = {"equity": round(equity, 6), "trades": len(self.trades),
@@ -216,6 +227,8 @@ def evaluate_one(model, rows, profile):
         "profit_factor": round(sum(profits)/sum(losses), 4) if losses else None,
         "max_drawdown": round(env.max_drawdown, 4),
         "holdout_candles": len(rows),
+        "flat_policy_actions": dict(zip(("WAIT","LONG","SHORT","CLOSE"), env.flat_action_counts)),
+        "in_position_policy_actions": dict(zip(("WAIT","LONG","SHORT","CLOSE"), env.position_action_counts)),
     }
 
 
@@ -233,6 +246,8 @@ def main():
     ap.add_argument("--taker-fee-bps", type=float, default=5)
     ap.add_argument("--slippage-bps", type=float, default=2)
     ap.add_argument("--assumed-spread-bps", type=float, default=1)
+    ap.add_argument("--demo-feedback", default="", help="PRIVATE JSONL of closed PPO DEMO experiences (never GitHub)")
+    ap.add_argument("--min-feedback-trades", type=int, default=30)
     args = ap.parse_args()
     if args.steps < 20_000:
         ap.error("minimum 20000 steps")
@@ -284,6 +299,8 @@ def main():
     env = environment(train, training=True, profile=profile)
     check_env(env)
     model = PPO("MlpPolicy", env, verbose=1, seed=17, device="cpu",
+                learning_rate=1e-4, ent_coef=0.01, n_steps=1024,
+                batch_size=256, gamma=0.995, gae_lambda=0.97,
                 policy_kwargs={"net_arch": {"pi": [32, 32], "vf": [32, 32]},
                                "activation_fn": torch.nn.Tanh})
     # Balanced 512-bar episodes, at least 2 training episodes per eligible
@@ -293,7 +310,37 @@ def main():
     print(f"TRAINING_COVERAGE symbols={len(symbols)} requested_steps={args.steps} "
           f"effective_steps={effective_steps} min_episodes_per_symbol=2", flush=True)
     model.learn(total_timesteps=effective_steps)
+    feedback_summary = {"samples": 0, "applied": False, "reason": "no_private_feedback_supplied"}
+    if args.demo_feedback:
+        from tools.ppo_demo_feedback import load_feedback, refine_actor_with_closed_feedback
+        records = load_feedback(args.demo_feedback, set(symbols))
+        feedback_summary = refine_actor_with_closed_feedback(
+            model, records, min_samples=args.min_feedback_trades)
+        # Existing historical test is NOT prospective validation when
+        # DEMO feedback observations overlap the test's timeframe.
+        last_train_close = max(rows[-1]["t"] + BAR_MS for rows in train.values())
+        feedback_summary["holdout_independent_of_feedback"] = (
+            all(int(r["closed_at"].timestamp()*1000) <= last_train_close for r in records))
+        if not feedback_summary["holdout_independent_of_feedback"]:
+            feedback_summary["warning"] = "Research only: wait for future out-of-sample data after DEMO feedback"
+        print("DEMO_FEEDBACK_REFINEMENT", json.dumps(feedback_summary, default=str), flush=True)
     result = {symbol: evaluate_one(model, rows, profile) for symbol, rows in test.items()}
+    total_trades = sum(v["trades"] for v in result.values())
+    net_pnl = sum(v["net_pnl_usdc"] for v in result.values())
+    # Financial diagnostics are measured on holdout only, not training rewards.
+    quality_reasons = []
+    if total_trades < max(30, len(symbols)):
+        quality_reasons.append("INSUFFICIENT_HOLDOUT_TRADES")
+    if net_pnl <= 0:
+        quality_reasons.append("NEGATIVE_OR_FLAT_HOLDOUT_PNL")
+    if max(v["max_drawdown"] for v in result.values()) > 0.25:
+        quality_reasons.append("EXCESSIVE_INDIVIDUAL_DRAWDOWN")
+    if feedback_summary.get("holdout_independent_of_feedback") is False:
+        quality_reasons.append("FEEDBACK_OVERLAPS_HISTORICAL_HOLDOUT")
+    quality_report = {"trades": total_trades, "net_pnl_sum_of_independent_100usd_accounts": round(net_pnl, 4),
+                      "markets": len(symbols), "candidate_quality_reasons": quality_reasons,
+                      "model_approved": False}
+    print("PPO_HOLDOUT_QUALITY", json.dumps(quality_report), flush=True)
     policy = model.policy
     def layer(module):
         return {"weight": module.weight.detach().cpu().tolist(),
@@ -317,6 +364,10 @@ def main():
         "training_algorithm": "PPO", "steps": effective_steps,
         "requested_steps": args.steps,
         "symbol_sampling": "balanced_round_robin_512_bar_episodes",
+        "reward_contract": "scaled_log_equity_return_minus_incremental_drawdown_v1",
+        "training_entropy_coef": 0.01,
+        "demo_feedback": feedback_summary,
+        "candidate_quality": quality_report,
         "runtime_profile": profile,
         "universe_source": universe_report.get("source") if universe_report else "EXPLICIT_SYMBOLS",
         "universe_snapshot_timestamp_ms": (universe_report.get("snapshot_timestamp_ms")
@@ -327,6 +378,7 @@ def main():
     }
     (output/"manifest.json").write_text(json.dumps(meta, indent=2)+"\n", encoding="utf-8")
     print(json.dumps({"model_dir": str(output), "holdout": result,
+                      "feedback": feedback_summary, "quality": quality_report,
                       "approval": "DENIED until independent review"}, indent=2))
 
 

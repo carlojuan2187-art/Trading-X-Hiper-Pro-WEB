@@ -1,8 +1,5 @@
 name: Entrenar IA PPO DEMO (manual)
 on:
-  pull_request:
-    paths:
-      - 'tools/train_demo_ppo.py'
   workflow_dispatch:
     inputs:
       symbols:
@@ -13,7 +10,7 @@ on:
       steps:
         description: "Pasos PPO (min 20000)"
         required: true
-        default: "20000"
+        default: "100000"
         type: string
       leverage:
         description: "Apalancamiento de investigación (igual al worker DEMO)"
@@ -36,7 +33,6 @@ permissions:
 
 jobs:
   train-ppo:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 24
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

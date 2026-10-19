@@ -42,7 +42,7 @@ desde `main`, cuando sea integrado). En PR #24 se permiten pruebas
 aisladas, a 20.000 pasos para validar la infraestructura sin publicarla.
 Guarda dos artifacts: `trading-x-live-universe-coverage` (solicitados,
 historial descargado, excluidos, razón y cobertura) y
-`trading-x-ppo-research-unapproved` (actor y manifest). Retención: 14 días.
+`trading-x-ppo-research-unapproved` (actor, manifest y checkpoint PPO completo para reanudar). Retención: 14 días.
 
 Si alguno de los símbolos recién listados carece de 1.500 velas de 5m
 continuas, se registra explícitamente como excluido. El entrenamiento aborta
@@ -56,7 +56,7 @@ en todas las velas históricas (sesgo de selección). Tampoco se confunde
 preselección con aptitud de ejecución real: el spread y profundidad se validan
 por separado en el motor paper.
 
-Los archivos `models/trading_x_ppo/manifest.json` y `actor.json` son artefactos del entrenamiento, NO se generan hasta correr estos comandos. El entrenador exporta `approved_for_demo=false` **siempre**, aunque la evaluación salga positiva. Requiere auditoría de calidad, replay y aprobación explícita del responsable antes de marcarlo true y entregar ambos ficheros al worker. Nunca declarar rentabilidad a partir de un único holdout.
+Los archivos `models/trading_x_ppo/manifest.json`, `actor.json` y `ppo_model.zip` son artefactos del entrenamiento, NO se generan hasta correr estos comandos. El entrenador exporta `approved_for_demo=false` **siempre**, aunque la evaluación salga positiva. Requiere auditoría de calidad, replay y aprobación explícita del responsable antes de marcarlo true y entregar ambos ficheros al worker. Nunca declarar rentabilidad a partir de un único holdout.
 
 Para un cambio de modelo, pausar nuevas entradas, dejar que terminen las posiciones actuales o confirmar la política de traspaso; el worker sigue gestionando SL/TP pero no ejecuta CLOSE de un modelo distinto al que abrió la operación.
 
@@ -94,6 +94,24 @@ moderación acciones rentables y reduce el peso de acciones con pérdidas.
 Al menos 30 trades AI cerrados válidos son necesarios antes de aplicarlo;
 mientras haya menos, se preservan sin inventar feedback ni forzar operaciones.
 El PPO continúa entrenándose en el simulador histórico normal.
+
+### Continuar el aprendizaje entre versiones sin empezar de cero
+
+El entrenador guarda un tercer archivo exclusivo de investigación:
+`ppo_model.zip`, con la política PPO, su crítico y estado del optimizador.
+El siguiente reentrenamiento puede cargarlo con `--resume-model` y seguir
+aprendiendo con velas más recientes y experiencias DEMO acumuladas:
+
+```bash
+python -m tools.train_demo_ppo --symbols auto --csv data/trading_x_real_5m.csv --universe-report data/trading_x_live_universe.json --steps 250000 --resume-model ruta/checkpoint_anterior --demo-feedback private/demo_experiences_002.jsonl --output models/trading_x_ppo
+```
+
+Requiere `ppo_model.zip` + `manifest.json` de un entrenador propio y de
+confianza, con SHA256 verificado, mismo contrato de observación/acciones y
+perfil de riesgo. **No cargar checkpoints de PyTorch de fuentes no confiables.**
+El worker DEMO únicamente necesita `actor.json` + `manifest.json`: la
+dependencia pesada queda en el entorno de entrenamiento. El modo sin
+`--resume-model` entrena desde cero, para tener una referencia reproducible.
 
 El informe marca cualquier solapamiento de experiencias DEMO con el holdout
 histórico. Si existe, **la evaluación deja de ser prospectiva** y no puede

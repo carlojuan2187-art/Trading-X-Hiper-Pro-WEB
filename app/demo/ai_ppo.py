@@ -64,8 +64,18 @@ class PPOPolicy:
         meta = json.loads(path.read_text(encoding="utf-8"))
         if meta.get("schema") != MODEL_SCHEMA or meta.get("observation_names") != list(OBS_NAMES):
             raise ValueError("PPO model/observation schema mismatch")
-        if meta.get("approved_for_demo") is not True:
-            raise ValueError("PPO model not approved for demo")
+        # The user may explicitly opt into PAPER-ONLY research with an
+        # unapproved model. Negative/unknown PnL is acceptable for simulated
+        # learning but NEVER a claim of profitability or LIVE authorization.
+        is_approved = meta.get("approved_for_demo") is True
+        research_only = (meta.get("approved_for_demo") is False and
+                         os.getenv("DEMO_AI_PAPER_RESEARCH_MODE", "").lower() == "true" and
+                         os.getenv("DEMO_WORKER_MODE", "").lower() == "true" and
+                         os.getenv("DEMO_ENABLED", "").lower() == "true" and
+                         os.getenv("DEMO_DECISION_ENGINE", "ai_ppo").lower() == "ai_ppo")
+        if not is_approved and not research_only:
+            raise ValueError("PPO model not approved for demo; paper research requires explicit isolated opt-in")
+        self.research_only = bool(research_only)
         if meta.get("action_dims") != [4, 3, 3]:
             raise ValueError("PPO action schema mismatch")
         cap = float(os.getenv("DEMO_AI_MAX_MARGIN_USDC", "25"))

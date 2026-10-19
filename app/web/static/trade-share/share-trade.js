@@ -21,6 +21,11 @@ export function normalizeTrade(kind, raw) {
   if (!demo && kind !== 'live-open' && kind !== 'live-closed') throw new Error('Tipo de operación inválido.');
   const open = kind.endsWith('-open');
   let pnl = numeric(demo ? (open ? raw.unrealized_pnl_usdc : raw.pnl_net_usdc) : (open ? raw.unrealized_pnl_usdc : raw.profit));
+  // An open DEMO ledger floating PnL excludes entry fee (already debited
+  // from balance). The share card shows the all-in trade PnL, not balance PnL.
+  if (demo && open && pnl != null && numeric(raw.entry_fee_usdc) != null) {
+    pnl -= numeric(raw.entry_fee_usdc);
+  }
   const lev = positive(raw.leverage);
   const quantity = positive(raw.quantity || raw.qty || raw.qty_coin_for_log || raw.size);
   const margin = positive(raw.margin_usdc) || (positive(raw.notional_usdc || raw.qty_usdc_for_profit) && lev ? positive(raw.notional_usdc || raw.qty_usdc_for_profit) / lev : null);

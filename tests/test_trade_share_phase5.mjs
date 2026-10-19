@@ -15,6 +15,16 @@ test('DEMO abierta lleva entrada, capital simulado, beneficio y ROE', () => {
   assert.ok(!JSON.stringify(item).includes('secret'));
 });
 
+test('DEMO abierta resta la comisión de entrada exactamente una vez en tarjeta', () => {
+  const item=normalizeTrade('demo-open', {
+    symbol:'AAVE-PERP', direction:'short', entry_price:147.830428,
+    mark_price:147.10, unrealized_pnl_usdc:0.775,
+    entry_fee_usdc:0.125, margin_usdc:25, leverage:10
+  });
+  assert.ok(Math.abs(item.pnl-0.65)<1e-8);
+  assert.ok(Math.abs(item.roe-2.6)<1e-8);
+});
+
 test('DEMO cerrada usa neto y precio de salida, no el mark anterior', () => {
   const r = normalizeTrade('demo-closed', {
     symbol: 'ETH', direction:'short', entry_price:1000,

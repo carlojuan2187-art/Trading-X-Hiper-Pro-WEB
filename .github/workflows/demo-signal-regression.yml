@@ -5,6 +5,10 @@ on:
       - 'app/market_scanner.py'
       - 'app/trading_engine.py'
       - 'app/demo/simulator.py'
+      - 'app/demo/ai_ppo.py'
+      - 'tools/train_demo_ppo.py'
+      - 'tools/download_ai_candles.py'
+      - 'requirements-ai-train.txt'
       - 'app/demo/settings.py'
       - 'app/demo/worker.py'
       - 'app/strategies/liquidity_sweep_reversal.py'
@@ -31,6 +35,9 @@ jobs:
   regression:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Archived strategy tests only. Production worker rejects legacy mode.
+      DEMO_DECISION_ENGINE: legacy
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,6 +46,8 @@ jobs:
           cache: 'pip'
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Compile autonomous AI and worker
+        run: python -m compileall -q app/demo tools/train_demo_ppo.py tools/download_ai_candles.py
       - name: Scanner regression
         run: python tools/test_scanner_funnel_offline.py
       - name: Strategy contracts

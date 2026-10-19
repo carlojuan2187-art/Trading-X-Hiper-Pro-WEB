@@ -43,7 +43,8 @@ def load_csv(path: Path, symbol: str) -> list[dict]:
     return rows
 
 
-def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 1):
+def environment(datasets: dict[str, list[dict]], *, training: bool,
+                profile: dict, seed: int = 1):
     import gymnasium as gym
     import numpy as np
     from gymnasium import spaces
@@ -57,12 +58,19 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
             self.observation_space = spaces.Box(low=-3, high=3,
                                                 shape=(len(OBS_NAMES),), dtype=np.float32)
             self.random = random.Random(seed)
+            self.initial = float(profile["initial_capital_usdc"])
+            self.price_impact = (float(profile["slippage_bps"]) +
+                                 float(profile["assumed_spread_bps"])) / 10000
+            self.fee_rate = float(profile["taker_fee_bps"]) / 10000
+            self.leverage = int(profile["leverage"])
+            self.margin_cap = float(profile["margin_cap_usdc"])
+            self.position_percent = float(profile["position_percent"])
             self.rows = next(iter(datasets.values()))
             self.start = 40
             self.idx = 40
-            self.cash = 100.0
+            self.cash = self.initial
             self.pos = None
-            self.peak = 100.0
+            self.peak = self.initial
             self.trades = []
             self.max_drawdown = 0.0
 
@@ -98,8 +106,8 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
             else:
                 self.idx = 40
             self.start = self.idx
-            self.cash = 100.0
-            self.peak = 100.0
+            self.cash = self.initial
+            self.peak = self.initial
             self.max_drawdown = 0.0
             self.pos = None
             self.trades = []
@@ -108,9 +116,9 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
         def _close(self, px):
             p = self.pos
             # Adverse spread + slippage + taker on both sides.
-            exit_price = px * (1-0.0003 if p["side"] > 0 else 1+0.0003)
+            exit_price = px * (1-self.price_impact if p["side"] > 0 else 1+self.price_impact)
             gross = p["side"]*(exit_price-p["entry"])*p["qty"]
-            exit_fee = abs(exit_price*p["qty"])*0.0005
+            exit_fee = abs(exit_price*p["qty"])*self.fee_rate
             pnl = gross-p["entry_fee"]-exit_fee
             self.cash += gross-exit_fee
             self.trades.append(pnl)
@@ -126,13 +134,13 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
                 self._close(px)
             elif not self.pos and act in (1, 2):
                 side = 1 if act == 1 else -1
-                price = px*(1+0.0003 if side > 0 else 1-0.0003)
-                # Mirror default isolated DEMO AI paper sizing:
-                # 100 USDC equity, 25 USDC margin cap, 10x leverage.
-                margin = min(max(0.0, self.cash), 25.0)
-                size = margin*10.0
+                price = px*(1+self.price_impact if side > 0 else 1-self.price_impact)
+                # Match the approved model's broker-independent risk profile.
+                margin = min(max(0.0, self.cash*self.position_percent),
+                             self.margin_cap)
+                size = margin*self.leverage
                 qty = size/price if price > 0 else 0
-                entry_fee = size*0.0005
+                entry_fee = size*self.fee_rate
                 atr = observation(rows[self.idx-40:self.idx],
                                   rows[self.idx-1]["c"]*.9999,
                                   rows[self.idx-1]["c"]*1.0001)[1]
@@ -159,9 +167,9 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
             self.peak = max(self.peak, equity)
             drawdown = max(0, 1-equity/self.peak) if self.peak > 0 else 1
             self.max_drawdown = max(self.max_drawdown, drawdown)
-            reward = (equity-before)/100.0 - drawdown*0.0004
+            reward = (equity-before)/self.initial - drawdown*0.0004
             self.idx += 1
-            done = self.idx >= len(rows)-1 or equity < 20
+            done = self.idx >= len(rows)-1 or equity < self.initial*0.2
             truncated = bool(training and self.idx-self.start >= 512)
             if done or truncated:
                 if self.pos:
@@ -169,20 +177,20 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
                     self._close(bar["c"])
                     equity = self.cash
                     # Terminal reward also charges final execution costs.
-                    reward += (equity-marked_before_exit)/100.0
+                    reward += (equity-marked_before_exit)/self.initial
                 else:
                     equity = self.cash
             info = {"equity": round(equity, 6), "trades": len(self.trades),
                     "max_drawdown": round(self.max_drawdown, 6),
-                    "net_pnl": round(self.cash-100, 6)}
+                    "net_pnl": round(self.cash-self.initial, 6)}
             return (self._obs() if not (done or truncated) else
                     np.zeros(len(OBS_NAMES), dtype=np.float32)), float(reward), done, truncated, info
 
     return PaperEnv()
 
 
-def evaluate_one(model, rows):
-    env = environment({"validation": rows}, training=False)
+def evaluate_one(model, rows, profile):
+    env = environment({"validation": rows}, training=False, profile=profile)
     obs, _ = env.reset()
     done = truncated = False
     while not (done or truncated):
@@ -192,7 +200,7 @@ def evaluate_one(model, rows):
     losses = [-x for x in env.trades if x < 0]
     return {
         "trades": len(env.trades), "wins": len(profits),
-        "net_pnl_usdc": round(env.cash-100, 4),
+        "net_pnl_usdc": round(env.cash-env.initial, 4),
         "profit_factor": round(sum(profits)/sum(losses), 4) if losses else None,
         "max_drawdown": round(env.max_drawdown, 4),
         "holdout_candles": len(rows),
@@ -205,9 +213,33 @@ def main():
     ap.add_argument("--symbols", default="BTC,ETH,SOL")
     ap.add_argument("--output", default="models/trading_x_ppo")
     ap.add_argument("--steps", type=int, default=250_000)
+    ap.add_argument("--initial-capital", type=float, default=100)
+    ap.add_argument("--leverage", type=int, default=10)
+    ap.add_argument("--margin-cap", type=float, default=25)
+    ap.add_argument("--position-percent", type=float, default=1.0)
+    ap.add_argument("--taker-fee-bps", type=float, default=5)
+    ap.add_argument("--slippage-bps", type=float, default=2)
+    ap.add_argument("--assumed-spread-bps", type=float, default=1)
     args = ap.parse_args()
     if args.steps < 20_000:
         ap.error("minimum 20000 steps")
+    if (not 10 <= args.initial_capital <= 100000 or
+        not 1 <= args.leverage <= 50 or
+        not 1 <= args.margin_cap <= 1000 or
+        not 0 < args.position_percent <= 1 or
+        not 0 <= args.taker_fee_bps <= 50 or
+        not 0 <= args.slippage_bps <= 50 or
+        not 0 <= args.assumed_spread_bps <= 50):
+        ap.error("invalid broker research profile")
+    profile = {
+        "initial_capital_usdc": args.initial_capital,
+        "leverage": args.leverage,
+        "margin_cap_usdc": args.margin_cap,
+        "position_percent": args.position_percent,
+        "taker_fee_bps": args.taker_fee_bps,
+        "slippage_bps": args.slippage_bps,
+        "assumed_spread_bps": args.assumed_spread_bps,
+    }
     try:
         from stable_baselines3 import PPO
         from stable_baselines3.common.env_checker import check_env
@@ -220,13 +252,13 @@ def main():
     datasets = {symbol: load_csv(Path(args.csv), symbol) for symbol in symbols}
     train = {symbol: rows[:int(len(rows)*0.75)] for symbol, rows in datasets.items()}
     test = {symbol: rows[int(len(rows)*0.75)-40:] for symbol, rows in datasets.items()}
-    env = environment(train, training=True)
+    env = environment(train, training=True, profile=profile)
     check_env(env)
     model = PPO("MlpPolicy", env, verbose=1, seed=17, device="cpu",
                 policy_kwargs={"net_arch": {"pi": [32, 32], "vf": [32, 32]},
                                "activation_fn": torch.nn.Tanh})
     model.learn(total_timesteps=args.steps)
-    result = {symbol: evaluate_one(model, rows) for symbol, rows in test.items()}
+    result = {symbol: evaluate_one(model, rows, profile) for symbol, rows in test.items()}
     policy = model.policy
     def layer(module):
         return {"weight": module.weight.detach().cpu().tolist(),
@@ -248,9 +280,7 @@ def main():
         "trained_symbols": list(symbols), "approved_for_demo": False,
         "training_candles": {s: len(b) for s, b in train.items()}, "holdout": result,
         "training_algorithm": "PPO", "steps": args.steps,
-        "fee_bps_per_side": 5, "slippage_and_spread_bps_per_side": 3,
-        "runtime_profile": {"leverage": 10, "position_percent": 1.0,
-                            "margin_cap_usdc": 25.0},
+        "runtime_profile": profile,
     }
     (output/"manifest.json").write_text(json.dumps(meta, indent=2)+"\n", encoding="utf-8")
     print(json.dumps({"model_dir": str(output), "holdout": result,

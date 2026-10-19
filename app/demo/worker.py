@@ -109,12 +109,9 @@ def tick(*, do_scan: bool = False, quote_provider=None, selector=None) -> dict:
                 continue
             bid, ask = quote(str(selected['symbol']))
             current = ledger.read(uid)
-            gate = ai_gate(current) if AI_DEMO_MODE else entry_gate_reason(current) if current else "NOT_FOUND"
-            if not current or gate is not None or (not AI_DEMO_MODE and not user_ready(uid)):
+            if not current or entry_gate_reason(current) is not None or not user_ready(uid):
                 continue
-            updated = (open_ai_position(current, selected["ai_decision"], bid, ask,
-                                        float(selected["ai_atr"]), rejection=reason)
-                       if AI_DEMO_MODE else open_position(current, selected, bid, ask, rejection=reason))
+            updated = open_position(current, selected, bid, ask)
             if updated:
                 ledger.save(current, updated)
                 result['opened'] += 1
@@ -301,10 +298,16 @@ class DemoMarketRunner:
                 continue
             try:
                 current = ledger.read(uid)
-                if not current or entry_gate_reason(current) is not None or not user_ready(uid):
+                if not current:
+                    continue
+                gate = ai_gate(current) if AI_DEMO_MODE else entry_gate_reason(current)
+                if gate is not None or (not AI_DEMO_MODE and not user_ready(uid)):
                     continue
                 reason: dict = {}
-                updated = open_position(current, selected, bid, ask, rejection=reason)
+                updated = (open_ai_position(current, selected["ai_decision"], bid, ask,
+                                            float(selected["ai_atr"]), rejection=reason)
+                           if AI_DEMO_MODE else open_position(current, selected, bid, ask,
+                                                             rejection=reason))
                 if updated:
                     saved = ledger.save(current, updated)
                     opened += 1

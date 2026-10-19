@@ -3,6 +3,12 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import os
+# Offline test only: the project config requires these fields at import time.
+os.environ.setdefault("DEMO_WORKER_MODE", "true")
+os.environ.setdefault("DEMO_ENABLED", "true")
+os.environ.setdefault("ADMIN_TELEGRAM_ID", "1")
+os.environ.setdefault("MONGO_URL", "mongodb://127.0.0.1:27017")
 import tempfile
 from pathlib import Path
 import time

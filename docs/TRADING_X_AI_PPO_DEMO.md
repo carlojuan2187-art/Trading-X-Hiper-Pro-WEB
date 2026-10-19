@@ -28,6 +28,9 @@ python -m unittest tests.test_demo_ai_ppo -v
 python -m compileall -q app/demo tools/train_demo_ppo.py tools/download_ai_candles.py
 ```
 
+### Alternativa sin ordenador local
+Se añadió `.github/workflows/train-demo-ppo.yml` para entrenamiento **manual** en GitHub Actions usando CPU. Cuando dicho workflow esté disponible en la rama predeterminada, selecciona **Actions → Entrenar IA PPO DEMO (manual) → Run workflow**. Genera un artifact llamado `trading-x-ppo-research-unapproved` con ambos JSON y retención de 14 días. **No entrena automáticamente ni aprueba modelos**; depende de la disponibilidad/cupos de GitHub Actions y del acceso del runner al histórico real. En la presente Pull Request en borrador, el workflow aún no está integrado en `main`.
+
 Los archivos `models/trading_x_ppo/manifest.json` y `actor.json` son artefactos del entrenamiento, NO se generan hasta correr estos comandos. El entrenador exporta `approved_for_demo=false` **siempre**, aunque la evaluación salga positiva. Requiere auditoría de calidad, replay y aprobación explícita del responsable antes de marcarlo true y entregar ambos ficheros al worker. Nunca declarar rentabilidad a partir de un único holdout.
 
 Para un cambio de modelo, pausar nuevas entradas, dejar que terminen las posiciones actuales o confirmar la política de traspaso; el worker sigue gestionando SL/TP pero no ejecuta CLOSE de un modelo distinto al que abrió la operación.

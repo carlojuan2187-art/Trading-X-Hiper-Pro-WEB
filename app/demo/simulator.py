@@ -225,7 +225,7 @@ def open_position(account: dict, selected: dict, bid: float, ask: float,
     return updated
 
 
-def update_position(account: dict, bid: float, ask: float) -> dict | None:
+def update_position(account: dict, bid: float, ask: float, *,\n                    force_close_reason: str | None = None) -> dict | None:
     """Mark-to-market y cierre por TP/SL; bajo gap se cierra a bid/ask, no al trigger.
 
     La posición se gestiona incluso si autoentrada está en pausa.
@@ -248,9 +248,7 @@ def update_position(account: dict, bid: float, ask: float) -> dict | None:
         reason = 'SL' if bid <= stop else 'TP' if bid >= target else None
     else:
         reason = 'SL' if ask >= stop else 'TP' if ask <= target else None
-    updated = deepcopy(account)
-    quote_at = datetime.now(timezone.utc)
-    updated['last_tick_at'] = quote_at.isoformat()
+    # For autonomous DEMO, the model may request a discretionary exit.\n    # A protective SL always takes precedence, then TP, then AI_CLOSE.\n    if reason is None and force_close_reason is not None:\n        if force_close_reason != 'AI_EXIT' or position.get('decision_source') != 'ai_ppo_only':\n            raise ValueError('AI exit requires an AI-owned DEMO position')\n        reason = force_close_reason\n    updated = deepcopy(account)\n    quote_at = datetime.now(timezone.utc)\n    updated['last_tick_at'] = quote_at.isoformat()
     # Original SL/TP always take precedence. BE may arm only on an executable
     # bid/ask quote with >=1R *gross* move and positive fee-adjusted net.
     if reason is None and position.get('demo_be_enabled') and not position.get('demo_be_armed'):

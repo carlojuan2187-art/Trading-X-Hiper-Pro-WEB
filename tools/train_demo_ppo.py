@@ -60,9 +60,9 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
             self.rows = next(iter(datasets.values()))
             self.start = 40
             self.idx = 40
-            self.cash = 1000.0
+            self.cash = 100.0
             self.pos = None
-            self.peak = 1000.0
+            self.peak = 100.0
             self.trades = []
             self.max_drawdown = 0.0
 
@@ -98,8 +98,8 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
             else:
                 self.idx = 40
             self.start = self.idx
-            self.cash = 1000.0
-            self.peak = 1000.0
+            self.cash = 100.0
+            self.peak = 100.0
             self.max_drawdown = 0.0
             self.pos = None
             self.trades = []
@@ -127,7 +127,10 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
             elif not self.pos and act in (1, 2):
                 side = 1 if act == 1 else -1
                 price = px*(1+0.0003 if side > 0 else 1-0.0003)
-                size = max(0, self.cash*0.1*3)
+                # Mirror default isolated DEMO AI paper sizing:
+                # 100 USDC equity, 25 USDC margin cap, 10x leverage.
+                margin = min(max(0.0, self.cash), 25.0)
+                size = margin*10.0
                 qty = size/price if price > 0 else 0
                 entry_fee = size*0.0005
                 atr = observation(rows[self.idx-40:self.idx],
@@ -146,16 +149,19 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
                 stop_hit = bar["l"] <= p["stop"] if p["side"] > 0 else bar["h"] >= p["stop"]
                 tp_hit = bar["h"] >= p["target"] if p["side"] > 0 else bar["l"] <= p["target"]
                 if stop_hit:
-                    self._close(p["stop"])
+                    # Stop crossed between bars? Fill at the WORSE opening price.
+                    adverse_stop = (min(p["stop"], px) if p["side"] > 0
+                                    else max(p["stop"], px))
+                    self._close(adverse_stop)
                 elif tp_hit:
                     self._close(p["target"])
             equity = self._mark(bar["c"])
             self.peak = max(self.peak, equity)
             drawdown = max(0, 1-equity/self.peak) if self.peak > 0 else 1
             self.max_drawdown = max(self.max_drawdown, drawdown)
-            reward = (equity-before)/1000.0 - drawdown*0.0004
+            reward = (equity-before)/100.0 - drawdown*0.0004
             self.idx += 1
-            done = self.idx >= len(rows)-1 or equity < 200
+            done = self.idx >= len(rows)-1 or equity < 20
             truncated = bool(training and self.idx-self.start >= 512)
             if done or truncated:
                 if self.pos:
@@ -163,7 +169,7 @@ def environment(datasets: dict[str, list[dict]], *, training: bool, seed: int = 
                 equity = self.cash
             info = {"equity": round(equity, 6), "trades": len(self.trades),
                     "max_drawdown": round(self.max_drawdown, 6),
-                    "net_pnl": round(self.cash-1000, 6)}
+                    "net_pnl": round(self.cash-100, 6)}
             return (self._obs() if not (done or truncated) else
                     np.zeros(len(OBS_NAMES), dtype=np.float32)), float(reward), done, truncated, info
 
@@ -181,7 +187,7 @@ def evaluate_one(model, rows):
     losses = [-x for x in env.trades if x < 0]
     return {
         "trades": len(env.trades), "wins": len(profits),
-        "net_pnl_usdc": round(env.cash-1000, 4),
+        "net_pnl_usdc": round(env.cash-100, 4),
         "profit_factor": round(sum(profits)/sum(losses), 4) if losses else None,
         "max_drawdown": round(env.max_drawdown, 4),
         "holdout_candles": len(rows),
@@ -238,6 +244,8 @@ def main():
         "training_candles": {s: len(b) for s, b in train.items()}, "holdout": result,
         "training_algorithm": "PPO", "steps": args.steps,
         "fee_bps_per_side": 5, "slippage_and_spread_bps_per_side": 3,
+        "runtime_profile": {"leverage": 10, "position_percent": 1.0,
+                            "margin_cap_usdc": 25.0},
     }
     (output/"manifest.json").write_text(json.dumps(meta, indent=2)+"\n", encoding="utf-8")
     print(json.dumps({"model_dir": str(output), "holdout": result,

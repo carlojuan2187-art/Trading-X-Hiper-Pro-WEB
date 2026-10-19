@@ -74,7 +74,8 @@ class PPOPolicy:
             profile.get("leverage") != LEVERAGE or
             float(profile.get("position_percent", -1)) != POSITION_PERCENT or
             float(profile.get("margin_cap_usdc", -1)) != effective_cap or
-            DEMO_TAKER_FEE_BPS != 5.0 or DEMO_SLIPPAGE_BPS != 2.0):
+            float(profile.get("taker_fee_bps", -1)) != DEMO_TAKER_FEE_BPS or
+            float(profile.get("slippage_bps", -1)) != DEMO_SLIPPAGE_BPS):
             raise ValueError("AI training/runtime risk profile mismatch: retrain before deploy")
         filename = meta.get("actor_file")
         if filename != "actor.json":

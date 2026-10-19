@@ -27,6 +27,7 @@ on:
       - 'tests/**'
       - 'tools/test_*offline.py'
       - '.github/workflows/demo-signal-regression.yml'
+      - '.github/workflows/train-demo-ppo.yml'
   workflow_dispatch:
 
 permissions:

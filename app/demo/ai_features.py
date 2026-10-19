@@ -26,7 +26,7 @@ OBS_NAMES = (
 ACTIONS = ("WAIT", "LONG", "SHORT", "CLOSE")
 STOP_ATR = (0.8, 1.2, 1.8)
 TAKE_ATR = (1.2, 2.0, 3.0)
-MODEL_SCHEMA = "trading_x_ppo_v1"
+MODEL_SCHEMA = "trading_x_ppo_v2"
 
 
 def configured_symbols() -> tuple[str, ...]:
@@ -74,11 +74,15 @@ def observation(candles: list[dict], bid: float, ask: float,
         entry = float(position["entry_price"])
         unrealized = sign * ((bid if sign > 0 else ask) / entry - 1)
         age = min(1.0, max(0.0, float(position.get("ai_bars_held", 0)) / 100))
+    # Model inputs are expressed in percent units. Raw log returns around
+    # 0.001 make the neural actor almost blind to M5 price movement.
+    # The same immutable schema is used by both offline PPO and DEMO WS.
     values = [
-        returns[-1], sum(returns[-3:]), sum(returns[-12:]),
-        (highs[-1]-lows[-1])/close, (close-opens[-1])/close,
-        atr/close, volumes[-1]/max(sum(volumes[-21:-1])/20, 1e-9)-1,
-        vol, close/closes[-13]-1, (ask-bid)/bid, sign, unrealized, age,
+        returns[-1]*100, sum(returns[-3:])*100, sum(returns[-12:])*100,
+        (highs[-1]-lows[-1])/close*100, (close-opens[-1])/close*100,
+        atr/close*100, volumes[-1]/max(sum(volumes[-21:-1])/20, 1e-9)-1,
+        vol*100, (close/closes[-13]-1)*100, (ask-bid)/bid*100,
+        sign, unrealized*100, age,
     ]
     # All values bounded to keep the on-device actor stable across coins.
     values = [max(-3.0, min(3.0, float(x))) for x in values]

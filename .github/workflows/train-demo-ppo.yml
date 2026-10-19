@@ -1,5 +1,9 @@
 name: Entrenar IA PPO DEMO (manual)
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/train-demo-ppo.yml'
+      - 'tools/train_demo_ppo.py'
   workflow_dispatch:
     inputs:
       symbols:
@@ -49,16 +53,16 @@ jobs:
         env:
           SYMBOLS: ${{ inputs.symbols || 'BTC,ETH,SOL' }}
         run: |
-          python tools/download_ai_candles.py --symbols "$SYMBOLS" --days 10 --output data/trading_x_real_5m.csv
+          python -m tools.download_ai_candles --symbols "$SYMBOLS" --days 10 --output data/trading_x_real_5m.csv
       - name: Entrenar PPO y evaluar holdout separado
         env:
-          SYMBOLS: ${{ inputs.symbols }}
+          SYMBOLS: ${{ inputs.symbols || 'BTC,ETH,SOL' }}
           STEPS: ${{ inputs.steps || '20000' }}
           LEVERAGE: ${{ inputs.leverage || '10' }}
           MARGIN_CAP: ${{ inputs.margin_cap || '25' }}
           POSITION_PERCENT: ${{ inputs.position_percent || '1.0' }}
         run: |
-          python tools/train_demo_ppo.py --csv data/trading_x_real_5m.csv --symbols "$SYMBOLS" --steps "$STEPS" --leverage "$LEVERAGE" --margin-cap "$MARGIN_CAP" --position-percent "$POSITION_PERCENT" --output models/trading_x_ppo
+          python -m tools.train_demo_ppo --csv data/trading_x_real_5m.csv --symbols "$SYMBOLS" --steps "$STEPS" --leverage "$LEVERAGE" --margin-cap "$MARGIN_CAP" --position-percent "$POSITION_PERCENT" --output models/trading_x_ppo
       - name: Guardar checkpoint NO aprobado (14 días)
         uses: actions/upload-artifact@v4
         with:

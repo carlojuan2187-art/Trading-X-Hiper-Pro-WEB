@@ -708,6 +708,10 @@ async def async_main() -> None:
     # Validate approved model before starting the reconnect loop.
     manifest = os.getenv("DEMO_AI_MANIFEST", "models/trading_x_ppo/manifest.json")
     policy = PPOPolicy(manifest)
+    if policy.research_only:
+        logger.warning("DEMO_AI_PAPER_RESEARCH_ACTIVE approved_for_demo=false live_orders=FORBIDDEN "
+                       "model=%s: collecting real paper-trade outcomes for offline PPO refinement",
+                       policy.version)
     runtime_coins = configured_symbols(policy.symbols)
     if not set(runtime_coins).issubset(policy.symbols):
         raise SystemExit("DEMO_AI_SYMBOLS not present in approved model")

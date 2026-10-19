@@ -15,21 +15,46 @@
 4. Worker: bootstrap inicial de 65 velas por REST una vez al conectar; después datos de velas y bid/ask por WebSocket. Las cotizaciones caducadas y las series incompletas impiden operar.
 5. Per-user: la IA evalúa los símbolos permitidos, selecciona una acción favorable; ejecuciones paper mediante libro real y coste modelado. La IA puede pedir CLOSE por vela cerrada. Stop y TP permanecen garantizados *como reglas del simulador*, no como garantías de ejecución real.
 
-## Entrenar sin afectar al servidor
-Usa Python 3.11. Solo en máquina de entrenamiento, NUNCA instalar PyTorch en el worker Railway:
+## Entrenar con el universo dinámico del LIVE, sin afectar al servidor
+El universo no es BTC, ETH y SOL. El scanner LIVE construye su lista a partir
+de `metaAndAssetCtxs`, `app.symbol_policy`, volumen mínimo diario de 2M USDC e
+interés abierto nocional mínimo de 250k USDC. Sus valores configurables
+`SCANNER_*` se respetan también en el recopilador offline. LIVE examina hasta
+25 libros L2 por ciclo, con rotación: **no debemos entrenar únicamente esos
+25 pares momentáneos**, sino el conjunto completo que supera el prefiltrado,
+antes de la evaluación L2, para cubrir los candidatos de las siguientes rondas.
+La lista cambia con el mercado; no se utiliza un número fijo de símbolos.
+
+Comandos para Python 3.11, **solo en máquina de entrenamiento, nunca en Railway**:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-ai-train.txt
-python tools/download_ai_candles.py --symbols BTC,ETH,SOL --days 10 --output data/trading_x_real_5m.csv
-python tools/train_demo_ppo.py --csv data/trading_x_real_5m.csv --symbols BTC,ETH,SOL --steps 250000 --output models/trading_x_ppo
-python -m unittest tests.test_demo_ai_ppo -v
-python -m compileall -q app/demo tools/train_demo_ppo.py tools/download_ai_candles.py
+python -m tools.download_ai_candles --universe live --days 16 --min-symbols 10 --min-coverage 0.8 --output data/trading_x_real_5m.csv --report data/trading_x_live_universe.json
+python -m tools.train_demo_ppo --csv data/trading_x_real_5m.csv --symbols auto --universe-report data/trading_x_live_universe.json --steps 100000 --output models/trading_x_ppo
+python -m unittest discover -s tests -p 'test_*ai*.py' -v
 ```
 
-### Alternativa sin ordenador local
-Se añadió `.github/workflows/train-demo-ppo.yml` para entrenamiento **manual** en GitHub Actions usando CPU. Cuando dicho workflow esté disponible en la rama predeterminada, selecciona **Actions → Entrenar IA PPO DEMO (manual) → Run workflow**. Genera un artifact llamado `trading-x-ppo-research-unapproved` con ambos JSON y retención de 14 días. **No entrena automáticamente ni aprueba modelos**; depende de la disponibilidad/cupos de GitHub Actions y del acceso del runner al histórico real. En la presente Pull Request en borrador, el workflow aún no está integrado en `main`.
+El workflow `.github/workflows/train-demo-ppo.yml` permite entrenar con
+**`universe=live`** (opción predeterminada al lanzar manualmente el workflow
+desde `main`, cuando sea integrado). En PR #24 se permiten pruebas
+aisladas, a 20.000 pasos para validar la infraestructura sin publicarla.
+Guarda dos artifacts: `trading-x-live-universe-coverage` (solicitados,
+historial descargado, excluidos, razón y cobertura) y
+`trading-x-ppo-research-unapproved` (actor y manifest). Retención: 14 días.
+
+Si alguno de los símbolos recién listados carece de 1.500 velas de 5m
+continuas, se registra explícitamente como excluido. El entrenamiento aborta
+si se consiguen menos de 10 mercados o menos de un 80% de cobertura:
+**no se puede presentar como cobertura total de LIVE si hay exclusiones**.
+Para superar esta limitación se necesita ampliar el almacenamiento histórico
+de datos y realizar un plan de incorporación/reentrenamiento de nuevos pares.
+El informe y el manifest identifican el universo observado y su momento de
+selección. Que un mercado pase los umbrales hoy no garantiza que fuese elegible
+en todas las velas históricas (sesgo de selección). Tampoco se confunde
+preselección con aptitud de ejecución real: el spread y profundidad se validan
+por separado en el motor paper.
 
 Los archivos `models/trading_x_ppo/manifest.json` y `actor.json` son artefactos del entrenamiento, NO se generan hasta correr estos comandos. El entrenador exporta `approved_for_demo=false` **siempre**, aunque la evaluación salga positiva. Requiere auditoría de calidad, replay y aprobación explícita del responsable antes de marcarlo true y entregar ambos ficheros al worker. Nunca declarar rentabilidad a partir de un único holdout.
 
@@ -41,7 +66,7 @@ Conserva variables actuales `MONGO_URL`, `MONGO_DB_NAME`, `ADMIN_TELEGRAM_ID`, `
 ```dotenv
 DEMO_DECISION_ENGINE=ai_ppo
 DEMO_AI_MANIFEST=models/trading_x_ppo/manifest.json
-DEMO_AI_SYMBOLS=BTC,ETH,SOL
+DEMO_AI_SYMBOLS=AUTO
 DEMO_AI_MAX_MARGIN_USDC=25
 ```
 
@@ -59,8 +84,9 @@ Replica: 1 (el lease de Mongo evita colisiones). Asegura que `actor.json` y `man
 5. Si el worker AI falla, **no activar el motor viejo**: pausar DEMO, preservar posiciones y rollback explícito a una versión verificada. No eliminar ni resetear historial con posiciones abiertas.
 
 ## Limitaciones reconocidas
-- **No se ha entrenado ni validado un modelo real en este cambio**: no hay CSV ni checkpoint del usuario en el repositorio.
+- Las pruebas PPO de BTC/ETH/SOL iniciales no prueban rentabilidad ni cobertura LIVE. Los modelos de investigación generados en GitHub Actions permanecen no aprobados y se almacenan como artifacts, no como archivos comprometidos en el repositorio.
 - PPO no garantiza ganancias, el simulador OHLCV no replica ordenes parcialmente llenadas, book completo ni gaps de la cuenta real.
 - Entrenamiento offline por versiones, no aprendizaje incremental por operación cerrada en producción: el reentrenamiento con resultados DEMO es una fase posterior con controles contra overfitting y contaminación del holdout.
 - El retorno se mide con net PnL, profit factor, max drawdown y número de trades. Resultados con pocas operaciones no acreditan mejora estadística.
-- La selección de símbolos trabaja con universo autorizado (por defecto BTC/ETH/SOL) y máximo de 12 símbolos para limitar upstream y recursos. Se debe entrenar el modelo con exactamente ese universo.
+- `DEMO_AI_SYMBOLS=AUTO` (o variable ausente) usa todos los mercados entrenados y aprobados incluidos en el manifest. La lista se congela por versión del modelo, con un límite técnico de 250, y requiere observar carga de WebSocket, REST inicial y recursos del worker antes de activarse. Un símbolo nuevo no entrenado no puede operar sin un nuevo checkpoint aprobado. Puede restringirse a un subconjunto explícito, pero ya no se vuelve silenciosamente a BTC/ETH/SOL.
+- El universo LIVE elegible rota con el tiempo y la ventana histórica de Hyperliquid limita las velas M5 recientes disponibles. Ampliar la cobertura y el historial es distinto de garantizar ventaja predictiva.

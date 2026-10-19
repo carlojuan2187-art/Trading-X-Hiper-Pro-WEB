@@ -25,6 +25,7 @@ from app.config import (
 from app.demo.simulator import valid_quote, fill_price, fee_usdc, _money, _quantity
 from app.demo.ledger import now_iso
 from app.demo.ai_experience import clean_observation
+from app.demo.ai_online import PaperFeedbackActor
 from app.demo.settings import DEMO_TAKER_FEE_BPS, DEMO_SLIPPAGE_BPS
 
 from app.demo.ai_features import (
@@ -109,14 +110,36 @@ class PPOPolicy:
         if not symbols or not isinstance(symbols, list):
             raise ValueError("missing training symbols")
         self.symbols = set(symbols)
+        self.feedback = PaperFeedbackActor(size=len(self.layers[-1]["bias"]))
+        self.feedback_lock = RLock()
+
+    def _features(self, obs: list[float]) -> tuple[list[float], list[float]]:
+        x = obs
+        for layer in self.layers:
+            x = [math.tanh(y) for y in _linear(x, layer)]
+        return x, _linear(x, self.head)
+
+    def observe_closed_trade(self, record: dict) -> bool:
+        """Learn once from a closed DEMO trade; never pretend this is PPO replay."""
+        if record.get("model_version") != self.version or record.get("symbol") not in self.symbols:
+            return False
+        with self.feedback_lock:
+            return self.feedback.learn(record, self._features)
+
+    def restore_closed_trades(self, records) -> dict:
+        """Reconstruct bounded learned corrections deterministically after restart."""
+        with self.feedback_lock:
+            self.feedback = PaperFeedbackActor(size=len(self.layers[-1]["bias"]))
+            for record in records:
+                self.observe_closed_trade(record)
+            return self.feedback.snapshot()
 
     def predict(self, symbol: str, obs: list[float]) -> Decision:
         if symbol not in self.symbols or len(obs) != len(OBS_NAMES) or not all(map(math.isfinite, obs)):
             raise ValueError("symbol_not_trained_or_bad_features")
-        x = obs
-        for layer in self.layers:
-            x = [math.tanh(y) for y in _linear(x, layer)]
-        logits = _linear(x, self.head)
+        with self.feedback_lock:
+            x, base_logits = self._features(obs)
+            logits = self.feedback.logits(base_logits, x)
         action_p = _softmax(logits[:4])
         # Deterministic argmax = no random exploration in DEMO.
         action = max(range(4), key=lambda i: action_p[i])

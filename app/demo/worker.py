@@ -160,6 +160,7 @@ class DemoMarketRunner:
         self.audit_flush_at: dict[tuple[int, str], float] = {}
         self.next_scan = time.monotonic()  # scanner es candle-driven, no polling de precios
         self.next_lease = time.monotonic()
+        self.ai_scan_status_at = 0.0  # Throttled operational diagnosis, no account IDs.
 
     @staticmethod
     def trace_trade(event: str, uid: int, position: dict | None, **extra) -> None:
@@ -423,17 +424,23 @@ class DemoMarketRunner:
             {"enabled": True, "position": None}) if ai_gate(a) is None),
             key=lambda a: int(a["_id"]))
         if not eligible:
+            if time.monotonic() >= self.ai_scan_status_at:
+                self.ai_scan_status_at = time.monotonic() + 60
+                logger.warning("DEMO_AI_SCAN_STATUS eligible=0 enabled=%s reason=NO_ELIGIBLE_PAPER_ACCOUNT",
+                               ledger.COLLECTION.count_documents({"enabled": True}))
             return {}, self.scan_offset
         start = self.scan_offset % len(eligible)
         pool = [eligible[(start+i) % len(eligible)]
                 for i in range(min(len(eligible), DEMO_MAX_USERS_PER_SCAN))]
         next_offset = (start+len(pool)) % len(eligible)
         candidates = []
+        ready = 0
         for coin in self.ai_universe:
             snap = self.ai_market.snapshot(coin, lookback=self.ai_policy.lookback)
             if snap is None:
                 continue
             bars, bid, ask = snap
+            ready += 1
             try:
                 obs, atr = self.ai_policy.observe(bars, bid, ask)
                 decision = self.ai_policy.predict(coin, obs)
@@ -445,6 +452,10 @@ class DemoMarketRunner:
             except (TypeError, ValueError, ZeroDivisionError) as exc:
                 logger.warning("DEMO_AI_OBSERVATION_REJECTED coin=%s reason=%s", coin, exc)
         candidates.sort(key=lambda x: x[0], reverse=True)
+        if time.monotonic() >= self.ai_scan_status_at:
+            self.ai_scan_status_at = time.monotonic() + 60
+            logger.info("DEMO_AI_SCAN_STATUS eligible=%s markets=%s market_snapshots=%s entry_candidates=%s model=%s",
+                        len(eligible),len(self.ai_universe),ready,len(candidates),self.ai_policy.version)
         pending = {}
         for account in pool:
             last_entry = account.get("last_entry_at")

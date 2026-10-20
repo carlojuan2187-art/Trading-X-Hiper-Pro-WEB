@@ -15,7 +15,8 @@ from dataclasses import dataclass
 import math
 import random
 
-from app.demo.ai_features import ADVANCED_HISTORY_BARS
+from app.demo.ai_features import ADVANCED_HISTORY_BARS, advanced_observation
+from app.demo.ai_market_skills import market_skill_features
 from app.demo.ai_v4 import SKILLS_OBS_NAMES, SKILLS_MODEL_SCHEMA, V4_ACTIONS, skills_observation
 from app.demo.ai_stop_management import tighten_stop, maybe_follow_trailing
 from tools.ppo_skill_curriculum import build_lessons, trade_after_costs

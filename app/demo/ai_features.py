@@ -99,7 +99,7 @@ def observation(candles: list[dict], bid: float, ask: float,
 class CandleStore:
     """One bounded WS candle cache per symbol; open candles are NEVER features."""
     def __init__(self):
-        self.rows: dict[str, deque] = defaultdict(lambda: deque(maxlen=80))
+        self.rows: dict[str, deque] = defaultdict(lambda: deque(maxlen=560))
         self.books: dict[str, tuple[float, float, int]] = {}
         self.lock = RLock()
 
@@ -132,7 +132,7 @@ class CandleStore:
             with self.lock:
                 self.books[coin.upper()] = (bid, ask, int(time.time()*1000))
 
-    def snapshot(self, coin: str, *, now_ms: int | None = None):
+    def snapshot(self, coin: str, *, now_ms: int | None = None, lookback: int = 40):
         now = int(time.time()*1000) if now_ms is None else now_ms
         with self.lock:
             quote = self.books.get(coin)
@@ -140,9 +140,9 @@ class CandleStore:
                 return None
             # Never include an unfinished streaming candle.
             bars = [b.copy() for b in self.rows[coin] if b["t"] + BAR_MS <= now]
-        if len(bars) < 40 or now - (bars[-1]["t"] + BAR_MS) > BAR_MS:
+        if len(bars) < lookback or now - (bars[-1]["t"] + BAR_MS) > BAR_MS:
             return None
-        return bars[-40:], quote[0], quote[1]
+        return bars[-lookback:], quote[0], quote[1]
 
     def prime(self, coin: str, rows: list[dict]) -> int:
         count = 0
@@ -151,3 +151,55 @@ class CandleStore:
                 count += 1
         return count
 
+
+
+# PPO v3 research contract: opt-in only; existing v2 paper actors keep their
+# original schema, 40-bar observation, checkpoint and trading behavior.
+from app.demo.ai_indicators import (
+    HISTORY_BARS as ADVANCED_HISTORY_BARS,
+    INDICATOR_NAMES, multi_timeframe_features,
+)
+
+ADVANCED_ACTIONS = ("WAIT", "LONG", "SHORT", "CLOSE", "PROTECT", "TRAIL")
+ADVANCED_POSITION_NAMES = (
+    "position_net_r", "position_best_mfe_r", "position_stop_distance_r",
+    "position_original_risk_pct", "position_trailing_active",
+)
+ADVANCED_OBS_NAMES = OBS_NAMES + INDICATOR_NAMES + ADVANCED_POSITION_NAMES
+ADVANCED_MODEL_SCHEMA = "trading_x_ppo_v3_mtf_sl"
+
+
+def advanced_observation(candles: list[dict], bid: float, ask: float,
+                         position: dict | None = None) -> tuple[list[float], float]:
+    """M5, M15 and H1 closed bars + actual position feedback, no lookahead."""
+    if len(candles) < ADVANCED_HISTORY_BARS:
+        raise ValueError("advanced_candles_required")
+    base, atr = observation(candles[-40:], bid, ask, position)
+    indicators = multi_timeframe_features(candles[-ADVANCED_HISTORY_BARS:])
+    metrics = [0.0] * len(ADVANCED_POSITION_NAMES)
+    if position:
+        sign = 1 if position["direction"] == "long" else -1
+        entry = float(position["entry_price"])
+        exit_px = bid if sign > 0 else ask
+        qty = float(position.get("quantity") or 0)
+        margin = float(position.get("margin_usdc") or 0)
+        initial_stop = float(position.get("initial_stop_price") or 0)
+        stop = float(position.get("stop_price") or initial_stop)
+        risk = abs(entry-initial_stop)
+        if qty > 0 and margin > 0 and risk > 0:
+            fee_in = float(position.get("entry_fee_usdc") or 0)
+            fee_rate = fee_in / max(qty*entry, 1e-9)
+            fee_out = exit_px*qty*fee_rate
+            gross = sign*(exit_px-entry)*qty
+            metrics = [
+                (gross-fee_in-fee_out)/max(qty*risk, 1e-9),
+                float(position.get("audit_mfe_usdc") or 0)/max(qty*risk, 1e-9),
+                sign*(exit_px-stop)/risk,
+                risk/entry*100,
+                float(bool(position.get("ai_trailing_active"))),
+            ]
+    metrics = [max(-3.0,min(3.0,float(v))) for v in metrics]
+    values = base + indicators + metrics
+    if len(values) != len(ADVANCED_OBS_NAMES) or not all(map(math.isfinite, values)):
+        raise ValueError("invalid_advanced_observation")
+    return values, atr

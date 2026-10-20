@@ -22,6 +22,7 @@ from app.demo.ai_features import (
 )
 from app.demo.ai_stop_management import tighten_stop, maybe_follow_trailing
 from tools.train_demo_ppo import load_csv
+from tools.ppo_skill_curriculum import build_lessons, pretrain_actor
 
 
 def research_env(datasets, *, training, profile, seed=21):
@@ -257,6 +258,10 @@ def main():
     p.add_argument("--taker-fee-bps",type=float,default=5.0)
     p.add_argument("--slippage-bps",type=float,default=2.0)
     p.add_argument("--assumed-spread-bps",type=float,default=1.0)
+    p.add_argument("--lessons-per-symbol",type=int,default=160)
+    p.add_argument("--curriculum-epochs",type=int,default=3)
+    p.add_argument("--skip-curriculum",action="store_true",
+                   help="Controlled ablation: train pure PPO without teacher lessons")
     a=p.parse_args()
     if (a.steps<20000 or not 10<=a.initial_capital<=100000
             or not 1<=a.leverage<=50 or not 1<=a.margin_cap<=1000
@@ -295,6 +300,14 @@ def main():
                       gae_lambda=.97,learning_rate=1e-4,ent_coef=.015,
                       policy_kwargs={"net_arch":{"pi":[64,64],"vf":[64,64]},
                                      "activation_fn":torch.nn.Tanh})
+    if not a.skip_curriculum:
+        lessons=build_lessons(train,profile,
+                              max_per_symbol=a.lessons_per_symbol)
+        lesson_report=pretrain_actor(model,lessons,
+                                     epochs=a.curriculum_epochs)
+    else:
+        lesson_report={"stage":"ABLATION_PPO_ONLY","lessons":0,"epochs":0}
+    print("V3_SKILL_CURRICULUM "+json.dumps(lesson_report,sort_keys=True),flush=True)
     effective=max(a.steps,len(symbols)*512*2)
     print(f"V3_TRAINING_COVERAGE symbols={len(symbols)} requested_steps={a.steps} effective_steps={effective} full_M5_M15_H1=True",flush=True)
     model.learn(total_timesteps=effective)
@@ -343,6 +356,7 @@ def main():
           "action_semantics":list(ADVANCED_ACTIONS),
           "training_candles":{s:len(train[s]) for s in symbols},
           "holdout":results,"candidate_quality":quality,
+          "training_curriculum":lesson_report,
           "feedback_from_demo_trade_archive":"NOT_APPLIED_V2_SCHEMA_NEEDS_RECONSTRUCTION",
           "deployment_status":"RESEARCH_ONLY_NOT_DEPLOYED"}
     (output/"manifest.json").write_text(json.dumps(meta,indent=2)+"\n",encoding="utf-8")

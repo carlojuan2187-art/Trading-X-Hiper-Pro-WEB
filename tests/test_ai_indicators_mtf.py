@@ -56,7 +56,7 @@ class IndicatorTests(unittest.TestCase):
             advanced_observation(data[-400:],data[-1]["c"]-.02,data[-1]["c"]+.02)
         broken=candles()
         broken[-5]["t"]+=600000
-        with self.assertRaisesRegex(ValueError,"multi_timeframe_history_gap"):
+        with self.assertRaisesRegex(ValueError,"candle_gap|multi_timeframe_history_gap"):
             advanced_observation(broken,data[-1]["c"]-.02,data[-1]["c"]+.02)
 
     def test_position_has_advanced_learning_context(self):

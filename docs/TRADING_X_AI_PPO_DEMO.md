@@ -179,3 +179,62 @@ Replica: 1 (el lease de Mongo evita colisiones). Asegura que `actor.json` y `man
 - El retorno se mide con net PnL, profit factor, max drawdown y número de trades. Resultados con pocas operaciones no acreditan mejora estadística.
 - `DEMO_AI_SYMBOLS=AUTO` (o variable ausente) usa todos los mercados entrenados y aprobados incluidos en el manifest. La lista se congela por versión del modelo, con un límite técnico de 250, y requiere observar carga de WebSocket, REST inicial y recursos del worker antes de activarse. Un símbolo nuevo no entrenado no puede operar sin un nuevo checkpoint aprobado. Puede restringirse a un subconjunto explícito, pero ya no se vuelve silenciosamente a BTC/ETH/SOL.
 - El universo LIVE elegible rota con el tiempo y la ventana histórica de Hyperliquid limita las velas M5 recientes disponibles. Ampliar la cobertura y el historial es distinto de garantizar ventaja predictiva.
+
+
+## Experimento PPO v3: indicadores técnicos M5/M15/H1 y gestión dinámica (NO desplegado)
+
+El actor v2, actualmente publicado en el worker DEMO, conserva su esquema de
+13 observaciones y únicamente las decisiones WAIT/LONG/SHORT/CLOSE. No se
+reinterpretarán los pesos v2 como un modelo con conocimientos técnicos nuevos.
+
+PPO v3 se entrena por separado en `tools/train_demo_ppo_v3.py` usando
+`sb3-contrib/MaskablePPO` y 480 velas de 5 minutos cerradas. Se agregan
+únicamente grupos M15 y H1 completos para evitar lookahead:
+
+- M5: EMA 9/21, RSI 14, ADX 14 y diferencia DI+/DI−, histograma MACD,
+  desviación relativa a Bollinger y relación de volumen
+- M15 y H1: EMA 9/21, RSI 14, ADX 14, DI+/DI−, MACD y Bollinger
+- Estado de la posición: retorno neto en unidades R, mejor avance favorable
+  realizado, distancia al stop, riesgo inicial y trailing activo
+- ATR M5: dimensión de SL y TP elegida por el actor
+
+La política v3 elige entre WAIT, LONG, SHORT, CLOSE, PROTECT y TRAIL.
+Las decisiones inválidas se excluyen mediante una máscara durante el
+entrenamiento; cuando el modelo está plano no puede elegir CLOSE, y cuando
+tiene una posición no puede abrir otra LONG/SHORT.
+
+PROTECT intenta subir/bajar el SL a un nivel que cubre tarifas y un pequeño
+colchón solo si la posición es netamente positiva. TRAIL puede proteger
+ganancias por detrás del precio ejecutable, con distancia asociada al ATR y
+al riesgo original. Ninguno puede **aflojar** el stop ni saltarse el SL/TP
+original. La protección posterior por WebSocket solo es posible si TRAIL
+fue activado por la propia IA.
+
+**Estado real:** estas capacidades están creadas en la rama de investigación;
+el worker desplegado NO llama todavía a `advanced_observation` ni ejecuta
+las nuevas decisiones PROTECT/TRAIL. No se afirma lo contrario. La conexión
+del worker requiere una integración y despliegue separados, después de las
+pruebas y de una evaluación que demuestre mejora. LIVE no debe recibir v3.
+
+Cómo auditar el candidato (no subir datos privados):
+
+```bash
+python -m pip install -r requirements-ai-v3.txt
+python -m unittest tests.test_ai_indicators_mtf -v
+python -m tools.download_ai_candles --universe live --days 16 --output data/trading_x_v3_candles.csv --report data/trading_x_v3_coverage.json
+python -m tools.train_demo_ppo_v3 --csv data/trading_x_v3_candles.csv --universe-report data/trading_x_v3_coverage.json --steps 120000 --output models/trading_x_ppo_v3_research
+```
+
+Los resultados de v3 se evalúan en un bloque cronológico separado por mercado.
+El beneficio total mostrado suma cuentas simuladas por mercado, **no es el PnL
+de una cartera unificada**. El artefacto siempre lleva
+`approved_for_demo=false`, incluso con beneficio en holdout. Antes de una
+publicación real, se exige evaluación prospectiva, exposición, costes, drawdown
+y pruebas de compatibilidad con el ejecutor.
+
+Las experiencias privadas de v2 se retienen, pero sus observaciones de
+13 dimensiones **no se deben reutilizar sin reconstrucción histórica** en
+el actor v3 de 37 dimensiones: sería una falsa equivalencia entre estados.
+Los registros pueden emplearse para análisis de errores mientras se prepara
+un reentrenamiento fuera de muestra sin contaminación.
+

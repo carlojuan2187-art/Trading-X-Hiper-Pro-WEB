@@ -276,6 +276,13 @@ def update_position(account: dict, bid: float, ask: float, *,
                     updated['position']['demo_be_armed'] = True
                     updated['position']['demo_be_stop_price'] = candidate
                     updated['position']['demo_be_armed_at'] = quote_at.isoformat()
+    # Only a v3 AI TRAIL action can arm this WS-driven trailing protection.
+    # Protective TP/SL computed above always take precedence.
+    if reason is None and position.get('ai_trailing_active'):
+        from app.demo.ai_stop_management import maybe_follow_trailing
+        moved = maybe_follow_trailing(updated['position'], bid, ask)
+        if moved is not None:
+            updated['position'] = moved
     # Read-only audit measures: use the executable opposite bid/ask after
     # configured slippage, NOT the mid/mark price. Both extremes are gross
     # price excursions; fee-adjusted net PnL is accounted separately.

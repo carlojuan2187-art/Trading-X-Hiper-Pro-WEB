@@ -76,6 +76,48 @@ class V4RuntimeTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,"integrity"):
                     PPOPolicy(str(m))
 
+    def test_v4_paper_active_entry_is_model_led_and_gated(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = self.make_policy(Path(td))
+            actor = json.loads((Path(td)/"actor.json").read_text())
+            # WAIT dominates the unconditioned head, as in the dry V4 model.
+            actor["head"]["bias"][:6] = [9.0, 2.0, 0.0, 0, 0, 0]
+            raw = json.dumps(actor).encode()
+            (Path(td)/"actor.json").write_bytes(raw)
+            meta = json.loads(m.read_text())
+            meta["actor_sha256"] = sha256(raw).hexdigest()
+            m.write_text(json.dumps(meta))
+            with patch.dict(os.environ, {"DEMO_AI_PAPER_RESEARCH_MODE":"true",
+                                         "DEMO_DECISION_ENGINE":"ai_ppo",
+                                         "DEMO_ENABLED":"true",
+                                         "DEMO_WORKER_MODE":"true",
+                                         "DEMO_AI_ACTIVE_PAPER_MODE":"true"}):
+                p = PPOPolicy(str(m))
+                flat = [0.0]*len(SKILLS_OBS_NAMES)
+                # Zero evidence cannot create fake trades.
+                self.assertEqual(p.predict("BTC",flat).action,"WAIT")
+                for name,value in (
+                    ("m5_ema9_21_pct",0.10),("m15_ema9_21_pct",0.09),
+                    ("h1_ema9_21_pct",0.04),("m5_market_structure",0.3),
+                    ("mtf_structure_alignment",0.2),
+                ):
+                    flat[SKILLS_OBS_NAMES.index(name)] = value
+                choice = p.predict("BTC",flat)
+                self.assertEqual(choice.action,"LONG")
+                self.assertEqual(choice.selection,"PPO_V4_PAPER_DIRECTIONAL")
+                self.assertGreater(choice.probability,0.5)
+                flat[SKILLS_OBS_NAMES.index("m15_ema9_21_pct")] = -0.20
+                self.assertEqual(p.predict("BTC",flat).action,"WAIT")
+                with patch.dict(os.environ,{"DEMO_AI_ACTIVE_PAPER_MODE":"false"}):
+                    self.assertEqual(p.predict("BTC",flat).action,"WAIT")
+            with patch.dict(os.environ, {"DEMO_AI_PAPER_RESEARCH_MODE":"false",
+                                         "DEMO_DECISION_ENGINE":"ai_ppo",
+                                         "DEMO_ENABLED":"true",
+                                         "DEMO_WORKER_MODE":"true"}):
+                # Unapproved actors cannot use this in any nonresearch mode.
+                with self.assertRaisesRegex(ValueError,"not approved"):
+                    PPOPolicy(str(m))
+
     def test_invalid_action_contract_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             m=self.make_policy(Path(td))

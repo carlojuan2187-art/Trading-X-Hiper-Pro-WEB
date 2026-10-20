@@ -1,15 +1,7 @@
 name: Install vetted-isolation PPO V4 research actor for DEMO
 on:
-  push:
-    branches:
-      - feature/demo-autonomous-ppo
-    paths:
-      - '.github/workflows/install-demo-v4-paper.yml'
-      - 'app/demo/ai_v4.py'
-      - 'app/demo/ai_ppo.py'
-      - 'app/demo/worker.py'
-      - 'tests/test_ppo_v4_runtime.py'
-      - 'tools/ppo_skill_curriculum_v4.py'
+  workflow_dispatch:
+# Explicit recovery only, never automatically replace a later research actor.
 
 permissions:
   contents: write

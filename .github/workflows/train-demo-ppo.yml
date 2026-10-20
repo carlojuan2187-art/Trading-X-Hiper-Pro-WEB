@@ -48,7 +48,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 # One experiment per branch/PR. Superseded research jobs must not
 # multiply data API calls or consume CPU hours concurrently.
@@ -123,26 +123,4 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      - name: Pin paper-only model in isolated DEMO branch
-        if: github.event_name == 'pull_request' && github.event.pull_request.number == 24 && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          FEATURE_REF: ${{ github.head_ref }}
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import hashlib,json
-          folder=Path("models/trading_x_ppo")
-          m=json.loads((folder/"manifest.json").read_text())
-          assert m["approved_for_demo"] is False
-          assert len(m["trained_symbols"])>=30
-          for f,k in ((m["actor_file"],"actor_sha256"),(m["training_checkpoint_file"],"training_checkpoint_sha256")):
-              assert hashlib.sha256((folder/f).read_bytes()).hexdigest()==m[k]
-          print(f"PIN_PAPER_RESEARCH_CHECKPOINT model={m['version']} symbols={len(m['trained_symbols'])} approved=false")
-          PY
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin "$FEATURE_REF"
-          git checkout -B "$FEATURE_REF" "origin/$FEATURE_REF"
-          git add -f models/trading_x_ppo/actor.json models/trading_x_ppo/manifest.json models/trading_x_ppo/ppo_model.zip
-          git diff --cached --quiet || git commit -m "chore(ai): pin research-only PPO DEMO actor and checkpoint"
-          git push origin "HEAD:$FEATURE_REF"
+      # Research artifact only; NEVER overwrite the active DEMO v4 actor.

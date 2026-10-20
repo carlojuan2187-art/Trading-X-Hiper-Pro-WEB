@@ -59,6 +59,7 @@ class Decision:
     take_atr: float
     probability: float
     model_version: str
+    selection: str = "PPO_ARGMAX"
 
 
 class PPOPolicy:
@@ -153,6 +154,39 @@ class PPOPolicy:
             return advanced_observation(candles, bid, ask, position)
         return observation(candles, bid, ask, position)
 
+    def _active_paper_entry(self, obs: list[float], logits: list[float]) -> int | None:
+        """Deterministic V4 research-only direction when WAIT dominates.
+
+        Direction still comes from the PPO actor's LONG/SHORT head. Closed-bar
+        technical context vetoes unsupported directions; no random selection,
+        fixed signals, future candles, LIVE routing or guaranteed trades.
+        Returns None if neither side has enough independent market support.
+        """
+        idx = {name: i for i, name in enumerate(self.obs_names)}
+        direction = 1 if logits[1] > logits[2] else 2
+        chosen = _softmax([logits[1], logits[2]])[direction-1]
+        if chosen < 0.54:
+            return None
+        side = 1 if direction == 1 else -1
+        feature = lambda name: float(obs[idx[name]])
+        m5 = side*feature("m5_ema9_21_pct")
+        m15 = side*feature("m15_ema9_21_pct")
+        h1 = side*feature("h1_ema9_21_pct")
+        if m15 < -0.08 or h1 < -0.15:
+            return None  # Avoid obvious higher-timeframe opposition.
+        confirmations = (
+            m5 >= 0.015,
+            m15 >= 0.012,
+            side*feature("m5_market_structure") >= 0.06,
+            side*feature("m5_momentum_shift") >= 0.12,
+            side*feature("mtf_structure_alignment") >= 0.075,
+            feature("m5_breakout_up_atr" if side > 0 else "m5_breakout_down_atr") >= 0.05,
+            side*feature("m5_volume_price_confirmation") >= 0.12,
+        )
+        if sum(confirmations) < 2 or not any(confirmations[:2]):
+            return None
+        return direction
+
     def predict(self, symbol: str, obs: list[float]) -> Decision:
         if symbol not in self.symbols or len(obs) != len(self.obs_names) or not all(map(math.isfinite, obs)):
             raise ValueError("symbol_not_trained_or_bad_features")
@@ -160,6 +194,7 @@ class PPOPolicy:
             x, base_logits = self._features(obs)
             logits = self.feedback.logits(base_logits, x)
         primary_count = len(self.actions)
+        selection = "PPO_ARGMAX"
         if self.advanced:
             # Only valid state actions: flat -> WAIT/LONG/SHORT, in trade ->
             # WAIT/CLOSE/PROTECT/TRAIL. No invalid CLOSE while flat.
@@ -168,13 +203,24 @@ class PPOPolicy:
             masked = [logits[i] if i in valid else -1e9 for i in range(primary_count)]
             action_p = _softmax(masked)
             action = max(valid, key=lambda i: action_p[i])
+            if (self.v4 and self.research_only and not in_position
+                    and action == 0 and os.getenv("DEMO_AI_ACTIVE_PAPER_MODE", "true").lower() == "true"):
+                alternate = self._active_paper_entry(obs, logits)
+                if alternate is not None:
+                    action = alternate
+                    selection = "PPO_V4_PAPER_DIRECTIONAL"
         else:
             action_p = _softmax(logits[:primary_count])
             action = max(range(primary_count), key=lambda i: action_p[i])
         stop = max(range(3), key=lambda i: logits[primary_count+i])
         take = max(range(3), key=lambda i: logits[primary_count+3+i])
+        # On conditional paper entries log the normalized LONG/SHORT
+        # confidence rather than misleading near-zero unconditional odds.
+        confidence = (_softmax([logits[1], logits[2]])[action-1]
+                      if selection == "PPO_V4_PAPER_DIRECTIONAL"
+                      else action_p[action])
         return Decision(symbol, self.actions[action], STOP_ATR[stop], TAKE_ATR[take],
-                        action_p[action], self.version)
+                        confidence, self.version, selection)
 
 
 def ai_gate(account: dict) -> str | None:
@@ -238,7 +284,8 @@ def open_ai_position(account: dict, decision: Decision, bid: float, ask: float,
         "rr": round(abs(target-entry)/abs(entry-stop), 4),
         "strategy_id": "AI_PPO_AUTONOMOUS", "strategy_model": "ppo",
         "decision_source": "ai_ppo_only", "ai_model_version": decision.model_version,
-        "ai_action_probability": decision.probability, "ai_bars_held": 0,
+        "ai_action_probability": decision.probability,
+        "ai_decision_selection": decision.selection, "ai_bars_held": 0,
         "ai_last_decision_bar": None, "ai_stop_atr": decision.stop_atr,
         "ai_take_atr": decision.take_atr, "ai_entry_atr": atr,
         "ai_trailing_active": False, "ai_stop_moves": 0,

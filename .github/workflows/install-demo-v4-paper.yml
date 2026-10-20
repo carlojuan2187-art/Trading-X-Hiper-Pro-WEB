@@ -9,6 +9,7 @@ on:
       - 'app/demo/ai_ppo.py'
       - 'app/demo/worker.py'
       - 'tests/test_ppo_v4_runtime.py'
+      - 'tools/ppo_skill_curriculum_v4.py'
 
 permissions:
   contents: write

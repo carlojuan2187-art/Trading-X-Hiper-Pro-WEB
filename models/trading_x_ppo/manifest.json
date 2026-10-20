@@ -1,6 +1,6 @@
 {
   "schema": "trading_x_ppo_v2",
-  "version": "ppo-1792434426",
+  "version": "ppo-1792471801",
   "observation_names": [
     "return_1",
     "return_3",
@@ -22,7 +22,7 @@
     3
   ],
   "actor_file": "actor.json",
-  "actor_sha256": "b1b341b9fd2252291881a432c6bea124ca7ef18477e04ed32c5a970ec9a0fce5",
+  "actor_sha256": "701a2a6c8e930109fc4c6b9c68387682c1f209b594109a959706de0a77020548",
   "trained_symbols": [
     "AAVE",
     "ADA",
@@ -34,45 +34,37 @@
     "BNB",
     "BTC",
     "CASHCAT",
-    "CHIP",
     "CRV",
     "DOT",
     "ENA",
     "ETH",
     "ETHFI",
     "FARTCOIN",
-    "FET",
     "FIL",
-    "GRAM",
     "GRASS",
-    "HBAR",
     "INJ",
     "JUP",
     "LINK",
     "LIT",
     "LTC",
-    "MON",
     "MORPHO",
     "NEAR",
     "NIL",
     "ONDO",
     "PAXG",
+    "PENDLE",
     "PONS",
     "PUMP",
     "PYTH",
     "SAND",
     "SOL",
-    "SPX",
     "STRK",
     "SUI",
     "TAO",
     "TIA",
-    "TRX",
     "UNI",
-    "USELESS",
     "VVV",
     "WLD",
-    "XLM",
     "XMR",
     "XPL",
     "XRP",
@@ -91,45 +83,37 @@
     "BNB": 3456,
     "BTC": 3456,
     "CASHCAT": 3456,
-    "CHIP": 3456,
     "CRV": 3456,
     "DOT": 3456,
     "ENA": 3456,
     "ETH": 3456,
     "ETHFI": 3456,
     "FARTCOIN": 3456,
-    "FET": 3456,
     "FIL": 3456,
-    "GRAM": 3456,
     "GRASS": 3456,
-    "HBAR": 3456,
     "INJ": 3456,
     "JUP": 3456,
     "LINK": 3456,
     "LIT": 3456,
     "LTC": 3456,
-    "MON": 3456,
     "MORPHO": 3456,
     "NEAR": 3456,
     "NIL": 3456,
     "ONDO": 3456,
     "PAXG": 3456,
+    "PENDLE": 3456,
     "PONS": 3456,
     "PUMP": 3456,
     "PYTH": 3456,
     "SAND": 3456,
     "SOL": 3456,
-    "SPX": 3456,
     "STRK": 3456,
     "SUI": 3456,
     "TAO": 3456,
     "TIA": 3456,
-    "TRX": 3456,
     "UNI": 3456,
-    "USELESS": 3456,
     "VVV": 3456,
     "WLD": 3456,
-    "XLM": 3456,
     "XMR": 3456,
     "XPL": 3456,
     "XRP": 3456,
@@ -138,1092 +122,932 @@
   },
   "holdout": {
     "AAVE": {
-      "trades": 96,
-      "wins": 28,
-      "net_pnl_usdc": -25.881,
-      "profit_factor": 0.5347,
-      "max_drawdown": 0.3258,
+      "trades": 30,
+      "wins": 13,
+      "net_pnl_usdc": -0.5027,
+      "profit_factor": 0.9758,
+      "max_drawdown": 0.0845,
       "holdout_candles": 1192,
       "flat_policy_actions": {
-        "WAIT": 595,
-        "LONG": 0,
-        "SHORT": 96,
-        "CLOSE": 85
+        "WAIT": 853,
+        "LONG": 10,
+        "SHORT": 20,
+        "CLOSE": 48
       },
       "in_position_policy_actions": {
-        "WAIT": 57,
-        "LONG": 0,
-        "SHORT": 279,
-        "CLOSE": 39
-      }
-    },
-    "ADA": {
-      "trades": 105,
-      "wins": 20,
-      "net_pnl_usdc": -51.3429,
-      "profit_factor": 0.2629,
-      "max_drawdown": 0.5134,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 560,
-        "LONG": 0,
-        "SHORT": 105,
-        "CLOSE": 119
-      },
-      "in_position_policy_actions": {
-        "WAIT": 91,
-        "LONG": 0,
-        "SHORT": 239,
-        "CLOSE": 37
-      }
-    },
-    "AERO": {
-      "trades": 109,
-      "wins": 30,
-      "net_pnl_usdc": -21.1619,
-      "profit_factor": 0.7433,
-      "max_drawdown": 0.3058,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 539,
-        "LONG": 0,
-        "SHORT": 109,
-        "CLOSE": 69
-      },
-      "in_position_policy_actions": {
-        "WAIT": 85,
-        "LONG": 0,
-        "SHORT": 317,
-        "CLOSE": 32
-      }
-    },
-    "APT": {
-      "trades": 99,
-      "wins": 33,
-      "net_pnl_usdc": -20.3015,
-      "profit_factor": 0.7378,
-      "max_drawdown": 0.2233,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 559,
-        "LONG": 0,
-        "SHORT": 99,
-        "CLOSE": 78
-      },
-      "in_position_policy_actions": {
-        "WAIT": 74,
-        "LONG": 0,
-        "SHORT": 318,
-        "CLOSE": 23
-      }
-    },
-    "ARB": {
-      "trades": 96,
-      "wins": 30,
-      "net_pnl_usdc": -29.7586,
-      "profit_factor": 0.6205,
-      "max_drawdown": 0.3144,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 570,
-        "LONG": 0,
-        "SHORT": 96,
-        "CLOSE": 59
-      },
-      "in_position_policy_actions": {
-        "WAIT": 77,
-        "LONG": 0,
-        "SHORT": 324,
-        "CLOSE": 25
-      }
-    },
-    "ASTER": {
-      "trades": 77,
-      "wins": 22,
-      "net_pnl_usdc": -24.0831,
-      "profit_factor": 0.4246,
-      "max_drawdown": 0.2462,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 634,
-        "LONG": 0,
-        "SHORT": 77,
-        "CLOSE": 146
-      },
-      "in_position_policy_actions": {
-        "WAIT": 60,
-        "LONG": 0,
-        "SHORT": 214,
-        "CLOSE": 20
-      }
-    },
-    "AVAX": {
-      "trades": 100,
-      "wins": 26,
-      "net_pnl_usdc": -42.6501,
-      "profit_factor": 0.3851,
-      "max_drawdown": 0.4463,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 577,
-        "LONG": 0,
-        "SHORT": 100,
-        "CLOSE": 118
-      },
-      "in_position_policy_actions": {
-        "WAIT": 71,
-        "LONG": 0,
-        "SHORT": 261,
-        "CLOSE": 24
-      }
-    },
-    "BNB": {
-      "trades": 48,
-      "wins": 10,
-      "net_pnl_usdc": -17.9938,
-      "profit_factor": 0.1638,
-      "max_drawdown": 0.1801,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 756,
-        "LONG": 0,
-        "SHORT": 48,
-        "CLOSE": 167
-      },
-      "in_position_policy_actions": {
-        "WAIT": 34,
-        "LONG": 0,
-        "SHORT": 126,
-        "CLOSE": 20
-      }
-    },
-    "BTC": {
-      "trades": 44,
-      "wins": 9,
-      "net_pnl_usdc": -17.3142,
-      "profit_factor": 0.1364,
-      "max_drawdown": 0.1753,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 711,
-        "LONG": 0,
-        "SHORT": 44,
-        "CLOSE": 204
-      },
-      "in_position_policy_actions": {
-        "WAIT": 41,
-        "LONG": 0,
-        "SHORT": 135,
-        "CLOSE": 16
-      }
-    },
-    "CASHCAT": {
-      "trades": 120,
-      "wins": 35,
-      "net_pnl_usdc": -12.2656,
-      "profit_factor": 0.9205,
-      "max_drawdown": 0.3382,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 500,
-        "LONG": 0,
-        "SHORT": 120,
-        "CLOSE": 25
-      },
-      "in_position_policy_actions": {
-        "WAIT": 114,
-        "LONG": 0,
-        "SHORT": 378,
-        "CLOSE": 14
-      }
-    },
-    "CHIP": {
-      "trades": 102,
-      "wins": 38,
-      "net_pnl_usdc": -27.5656,
-      "profit_factor": 0.7202,
-      "max_drawdown": 0.2789,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 483,
-        "LONG": 0,
-        "SHORT": 102,
-        "CLOSE": 46
-      },
-      "in_position_policy_actions": {
-        "WAIT": 98,
-        "LONG": 0,
-        "SHORT": 398,
-        "CLOSE": 24
-      }
-    },
-    "CRV": {
-      "trades": 107,
-      "wins": 29,
-      "net_pnl_usdc": -42.0158,
-      "profit_factor": 0.537,
-      "max_drawdown": 0.4507,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 530,
-        "LONG": 0,
-        "SHORT": 107,
-        "CLOSE": 74
-      },
-      "in_position_policy_actions": {
-        "WAIT": 96,
-        "LONG": 0,
-        "SHORT": 322,
-        "CLOSE": 22
-      }
-    },
-    "DOT": {
-      "trades": 111,
-      "wins": 37,
-      "net_pnl_usdc": -24.0551,
-      "profit_factor": 0.7076,
-      "max_drawdown": 0.2811,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 570,
-        "LONG": 0,
-        "SHORT": 111,
-        "CLOSE": 66
-      },
-      "in_position_policy_actions": {
-        "WAIT": 69,
-        "LONG": 0,
-        "SHORT": 308,
-        "CLOSE": 27
-      }
-    },
-    "ENA": {
-      "trades": 106,
-      "wins": 28,
-      "net_pnl_usdc": -41.7502,
-      "profit_factor": 0.5836,
-      "max_drawdown": 0.4544,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 527,
-        "LONG": 0,
-        "SHORT": 106,
-        "CLOSE": 70
-      },
-      "in_position_policy_actions": {
-        "WAIT": 115,
-        "LONG": 0,
-        "SHORT": 313,
-        "CLOSE": 20
-      }
-    },
-    "ETH": {
-      "trades": 83,
-      "wins": 19,
-      "net_pnl_usdc": -34.2761,
-      "profit_factor": 0.2478,
-      "max_drawdown": 0.3439,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 660,
-        "LONG": 0,
-        "SHORT": 83,
-        "CLOSE": 140
-      },
-      "in_position_policy_actions": {
-        "WAIT": 67,
-        "LONG": 0,
-        "SHORT": 173,
-        "CLOSE": 28
-      }
-    },
-    "ETHFI": {
-      "trades": 95,
-      "wins": 26,
-      "net_pnl_usdc": -41.8139,
-      "profit_factor": 0.4812,
-      "max_drawdown": 0.4488,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 590,
-        "LONG": 0,
-        "SHORT": 95,
-        "CLOSE": 73
-      },
-      "in_position_policy_actions": {
-        "WAIT": 72,
-        "LONG": 0,
-        "SHORT": 297,
-        "CLOSE": 24
-      }
-    },
-    "FARTCOIN": {
-      "trades": 112,
-      "wins": 31,
-      "net_pnl_usdc": -34.7235,
-      "profit_factor": 0.5933,
-      "max_drawdown": 0.396,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 561,
-        "LONG": 0,
-        "SHORT": 112,
-        "CLOSE": 81
-      },
-      "in_position_policy_actions": {
-        "WAIT": 81,
-        "LONG": 0,
-        "SHORT": 289,
-        "CLOSE": 27
-      }
-    },
-    "FET": {
-      "trades": 97,
-      "wins": 28,
-      "net_pnl_usdc": -33.3196,
-      "profit_factor": 0.5648,
-      "max_drawdown": 0.3572,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 526,
-        "LONG": 0,
-        "SHORT": 97,
-        "CLOSE": 79
-      },
-      "in_position_policy_actions": {
-        "WAIT": 88,
-        "LONG": 0,
-        "SHORT": 337,
-        "CLOSE": 24
-      }
-    },
-    "FIL": {
-      "trades": 101,
-      "wins": 42,
-      "net_pnl_usdc": 0.7324,
-      "profit_factor": 1.0099,
-      "max_drawdown": 0.0975,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 501,
-        "LONG": 0,
-        "SHORT": 101,
-        "CLOSE": 42
-      },
-      "in_position_policy_actions": {
-        "WAIT": 110,
-        "LONG": 0,
-        "SHORT": 373,
-        "CLOSE": 24
-      }
-    },
-    "GRAM": {
-      "trades": 85,
-      "wins": 16,
-      "net_pnl_usdc": -34.6303,
-      "profit_factor": 0.2547,
-      "max_drawdown": 0.3495,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 693,
-        "LONG": 0,
-        "SHORT": 85,
-        "CLOSE": 152
-      },
-      "in_position_policy_actions": {
-        "WAIT": 33,
-        "LONG": 0,
-        "SHORT": 167,
-        "CLOSE": 21
-      }
-    },
-    "GRASS": {
-      "trades": 97,
-      "wins": 31,
-      "net_pnl_usdc": -9.0665,
-      "profit_factor": 0.9032,
-      "max_drawdown": 0.3101,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 516,
-        "LONG": 0,
-        "SHORT": 97,
-        "CLOSE": 54
-      },
-      "in_position_policy_actions": {
-        "WAIT": 113,
-        "LONG": 0,
-        "SHORT": 354,
-        "CLOSE": 17
-      }
-    },
-    "HBAR": {
-      "trades": 105,
-      "wins": 26,
-      "net_pnl_usdc": -39.7719,
-      "profit_factor": 0.4989,
-      "max_drawdown": 0.4002,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 550,
-        "LONG": 0,
-        "SHORT": 105,
-        "CLOSE": 105
-      },
-      "in_position_policy_actions": {
-        "WAIT": 77,
-        "LONG": 0,
-        "SHORT": 288,
-        "CLOSE": 26
-      }
-    },
-    "INJ": {
-      "trades": 109,
-      "wins": 28,
-      "net_pnl_usdc": -57.2805,
-      "profit_factor": 0.4917,
-      "max_drawdown": 0.5827,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 549,
-        "LONG": 0,
-        "SHORT": 109,
-        "CLOSE": 56
-      },
-      "in_position_policy_actions": {
-        "WAIT": 100,
-        "LONG": 0,
-        "SHORT": 315,
-        "CLOSE": 22
-      }
-    },
-    "JUP": {
-      "trades": 110,
-      "wins": 31,
-      "net_pnl_usdc": -35.6308,
-      "profit_factor": 0.5198,
-      "max_drawdown": 0.3929,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 570,
-        "LONG": 0,
-        "SHORT": 110,
-        "CLOSE": 85
-      },
-      "in_position_policy_actions": {
-        "WAIT": 66,
-        "LONG": 0,
-        "SHORT": 290,
-        "CLOSE": 30
-      }
-    },
-    "LINK": {
-      "trades": 101,
-      "wins": 29,
-      "net_pnl_usdc": -34.6221,
-      "profit_factor": 0.4312,
-      "max_drawdown": 0.353,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 597,
-        "LONG": 0,
-        "SHORT": 101,
-        "CLOSE": 104
-      },
-      "in_position_policy_actions": {
-        "WAIT": 78,
-        "LONG": 0,
-        "SHORT": 247,
-        "CLOSE": 24
-      }
-    },
-    "LIT": {
-      "trades": 86,
-      "wins": 18,
-      "net_pnl_usdc": -55.6554,
-      "profit_factor": 0.414,
-      "max_drawdown": 0.5647,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 505,
-        "LONG": 0,
-        "SHORT": 86,
-        "CLOSE": 64
-      },
-      "in_position_policy_actions": {
-        "WAIT": 117,
-        "LONG": 0,
-        "SHORT": 366,
-        "CLOSE": 13
-      }
-    },
-    "LTC": {
-      "trades": 82,
-      "wins": 14,
-      "net_pnl_usdc": -37.7292,
-      "profit_factor": 0.2378,
-      "max_drawdown": 0.3788,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 652,
-        "LONG": 0,
-        "SHORT": 82,
-        "CLOSE": 139
-      },
-      "in_position_policy_actions": {
-        "WAIT": 45,
-        "LONG": 0,
-        "SHORT": 207,
-        "CLOSE": 26
-      }
-    },
-    "MON": {
-      "trades": 125,
-      "wins": 35,
-      "net_pnl_usdc": -43.5022,
-      "profit_factor": 0.5656,
-      "max_drawdown": 0.4581,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 513,
-        "LONG": 0,
-        "SHORT": 125,
-        "CLOSE": 78
-      },
-      "in_position_policy_actions": {
-        "WAIT": 83,
-        "LONG": 0,
-        "SHORT": 331,
-        "CLOSE": 21
-      }
-    },
-    "MORPHO": {
-      "trades": 99,
-      "wins": 30,
-      "net_pnl_usdc": -28.8937,
-      "profit_factor": 0.5927,
-      "max_drawdown": 0.3324,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 615,
-        "LONG": 0,
-        "SHORT": 99,
-        "CLOSE": 87
-      },
-      "in_position_policy_actions": {
-        "WAIT": 65,
-        "LONG": 0,
-        "SHORT": 262,
-        "CLOSE": 23
-      }
-    },
-    "NEAR": {
-      "trades": 91,
-      "wins": 26,
-      "net_pnl_usdc": -32.8577,
-      "profit_factor": 0.694,
-      "max_drawdown": 0.3601,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 546,
-        "LONG": 0,
-        "SHORT": 91,
-        "CLOSE": 41
-      },
-      "in_position_policy_actions": {
-        "WAIT": 123,
-        "LONG": 0,
-        "SHORT": 346,
+        "WAIT": 188,
+        "LONG": 26,
+        "SHORT": 2,
         "CLOSE": 4
       }
     },
-    "NIL": {
-      "trades": 103,
-      "wins": 32,
-      "net_pnl_usdc": -24.5006,
-      "profit_factor": 0.7915,
-      "max_drawdown": 0.4396,
+    "ADA": {
+      "trades": 17,
+      "wins": 4,
+      "net_pnl_usdc": -7.3275,
+      "profit_factor": 0.5368,
+      "max_drawdown": 0.1062,
       "holdout_candles": 1192,
       "flat_policy_actions": {
-        "WAIT": 507,
-        "LONG": 0,
-        "SHORT": 103,
-        "CLOSE": 36
+        "WAIT": 934,
+        "LONG": 6,
+        "SHORT": 11,
+        "CLOSE": 71
       },
       "in_position_policy_actions": {
-        "WAIT": 102,
-        "LONG": 0,
-        "SHORT": 381,
-        "CLOSE": 22
+        "WAIT": 111,
+        "LONG": 12,
+        "SHORT": 6,
+        "CLOSE": 0
       }
     },
-    "ONDO": {
-      "trades": 102,
-      "wins": 30,
-      "net_pnl_usdc": -31.5006,
-      "profit_factor": 0.5755,
-      "max_drawdown": 0.3389,
+    "AERO": {
+      "trades": 34,
+      "wins": 18,
+      "net_pnl_usdc": 27.5354,
+      "profit_factor": 2.3607,
+      "max_drawdown": 0.0788,
       "holdout_candles": 1192,
       "flat_policy_actions": {
-        "WAIT": 526,
-        "LONG": 0,
-        "SHORT": 102,
-        "CLOSE": 87
-      },
-      "in_position_policy_actions": {
-        "WAIT": 112,
-        "LONG": 0,
-        "SHORT": 300,
-        "CLOSE": 24
-      }
-    },
-    "PAXG": {
-      "trades": 14,
-      "wins": 1,
-      "net_pnl_usdc": -5.0167,
-      "profit_factor": 0.0607,
-      "max_drawdown": 0.0502,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 870,
-        "LONG": 0,
-        "SHORT": 14,
-        "CLOSE": 234
-      },
-      "in_position_policy_actions": {
-        "WAIT": 2,
-        "LONG": 0,
-        "SHORT": 24,
-        "CLOSE": 7
-      }
-    },
-    "PONS": {
-      "trades": 109,
-      "wins": 32,
-      "net_pnl_usdc": -27.0168,
-      "profit_factor": 0.7942,
-      "max_drawdown": 0.3312,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 389,
-        "LONG": 0,
-        "SHORT": 109,
-        "CLOSE": 25
-      },
-      "in_position_policy_actions": {
-        "WAIT": 166,
-        "LONG": 0,
-        "SHORT": 446,
-        "CLOSE": 16
-      }
-    },
-    "PUMP": {
-      "trades": 104,
-      "wins": 27,
-      "net_pnl_usdc": -50.441,
-      "profit_factor": 0.6053,
-      "max_drawdown": 0.5529,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 531,
-        "LONG": 0,
-        "SHORT": 104,
-        "CLOSE": 38
-      },
-      "in_position_policy_actions": {
-        "WAIT": 146,
-        "LONG": 0,
-        "SHORT": 316,
-        "CLOSE": 16
-      }
-    },
-    "PYTH": {
-      "trades": 103,
-      "wins": 34,
-      "net_pnl_usdc": -23.0597,
-      "profit_factor": 0.7717,
-      "max_drawdown": 0.2767,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 465,
-        "LONG": 0,
-        "SHORT": 103,
-        "CLOSE": 47
-      },
-      "in_position_policy_actions": {
-        "WAIT": 104,
-        "LONG": 0,
-        "SHORT": 407,
-        "CLOSE": 25
-      }
-    },
-    "SAND": {
-      "trades": 77,
-      "wins": 22,
-      "net_pnl_usdc": -7.0628,
-      "profit_factor": 0.9126,
-      "max_drawdown": 0.3282,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 507,
-        "LONG": 0,
-        "SHORT": 77,
-        "CLOSE": 50
-      },
-      "in_position_policy_actions": {
-        "WAIT": 126,
-        "LONG": 0,
-        "SHORT": 377,
-        "CLOSE": 14
-      }
-    },
-    "SOL": {
-      "trades": 88,
-      "wins": 22,
-      "net_pnl_usdc": -37.1922,
-      "profit_factor": 0.2759,
-      "max_drawdown": 0.3726,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 679,
-        "LONG": 0,
-        "SHORT": 88,
-        "CLOSE": 128
-      },
-      "in_position_policy_actions": {
-        "WAIT": 40,
-        "LONG": 0,
-        "SHORT": 186,
-        "CLOSE": 30
-      }
-    },
-    "SPX": {
-      "trades": 91,
-      "wins": 22,
-      "net_pnl_usdc": -51.2922,
-      "profit_factor": 0.4455,
-      "max_drawdown": 0.5144,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 536,
-        "LONG": 0,
-        "SHORT": 91,
-        "CLOSE": 98
-      },
-      "in_position_policy_actions": {
-        "WAIT": 94,
-        "LONG": 0,
-        "SHORT": 313,
-        "CLOSE": 19
-      }
-    },
-    "STRK": {
-      "trades": 96,
-      "wins": 30,
-      "net_pnl_usdc": 3.9208,
-      "profit_factor": 1.035,
-      "max_drawdown": 0.2927,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 366,
-        "LONG": 0,
-        "SHORT": 96,
-        "CLOSE": 24
-      },
-      "in_position_policy_actions": {
-        "WAIT": 164,
-        "LONG": 0,
-        "SHORT": 482,
-        "CLOSE": 19
-      }
-    },
-    "SUI": {
-      "trades": 103,
-      "wins": 29,
-      "net_pnl_usdc": -40.1708,
-      "profit_factor": 0.4575,
-      "max_drawdown": 0.409,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 605,
-        "LONG": 0,
-        "SHORT": 103,
-        "CLOSE": 90
-      },
-      "in_position_policy_actions": {
-        "WAIT": 60,
-        "LONG": 0,
-        "SHORT": 261,
-        "CLOSE": 32
-      }
-    },
-    "TAO": {
-      "trades": 107,
-      "wins": 32,
-      "net_pnl_usdc": -43.76,
-      "profit_factor": 0.4529,
-      "max_drawdown": 0.47,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 568,
-        "LONG": 0,
-        "SHORT": 107,
-        "CLOSE": 84
-      },
-      "in_position_policy_actions": {
-        "WAIT": 73,
-        "LONG": 0,
-        "SHORT": 294,
-        "CLOSE": 25
-      }
-    },
-    "TIA": {
-      "trades": 78,
-      "wins": 26,
-      "net_pnl_usdc": -9.6635,
-      "profit_factor": 0.8969,
-      "max_drawdown": 0.3591,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 491,
-        "LONG": 0,
-        "SHORT": 78,
-        "CLOSE": 21
-      },
-      "in_position_policy_actions": {
-        "WAIT": 135,
-        "LONG": 0,
-        "SHORT": 410,
-        "CLOSE": 16
-      }
-    },
-    "TRX": {
-      "trades": 27,
-      "wins": 1,
-      "net_pnl_usdc": -10.4988,
-      "profit_factor": 0.0134,
-      "max_drawdown": 0.1069,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 841,
-        "LONG": 0,
-        "SHORT": 27,
-        "CLOSE": 206
-      },
-      "in_position_policy_actions": {
-        "WAIT": 11,
-        "LONG": 0,
-        "SHORT": 55,
-        "CLOSE": 11
-      }
-    },
-    "UNI": {
-      "trades": 113,
-      "wins": 26,
-      "net_pnl_usdc": -48.3091,
-      "profit_factor": 0.4785,
-      "max_drawdown": 0.5065,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 578,
-        "LONG": 0,
-        "SHORT": 113,
-        "CLOSE": 74
-      },
-      "in_position_policy_actions": {
-        "WAIT": 93,
-        "LONG": 0,
-        "SHORT": 271,
-        "CLOSE": 22
-      }
-    },
-    "USELESS": {
-      "trades": 115,
-      "wins": 37,
-      "net_pnl_usdc": -13.1206,
-      "profit_factor": 0.8768,
-      "max_drawdown": 0.3061,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 438,
-        "LONG": 0,
-        "SHORT": 115,
-        "CLOSE": 60
-      },
-      "in_position_policy_actions": {
-        "WAIT": 87,
-        "LONG": 0,
-        "SHORT": 430,
-        "CLOSE": 21
-      }
-    },
-    "VVV": {
-      "trades": 99,
-      "wins": 27,
-      "net_pnl_usdc": -29.2111,
-      "profit_factor": 0.6951,
-      "max_drawdown": 0.3155,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 464,
-        "LONG": 0,
-        "SHORT": 99,
-        "CLOSE": 53
-      },
-      "in_position_policy_actions": {
-        "WAIT": 140,
-        "LONG": 0,
-        "SHORT": 376,
-        "CLOSE": 19
-      }
-    },
-    "WLD": {
-      "trades": 95,
-      "wins": 24,
-      "net_pnl_usdc": -50.6108,
-      "profit_factor": 0.534,
-      "max_drawdown": 0.5061,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 547,
-        "LONG": 0,
-        "SHORT": 95,
-        "CLOSE": 61
-      },
-      "in_position_policy_actions": {
-        "WAIT": 102,
-        "LONG": 0,
-        "SHORT": 326,
-        "CLOSE": 20
-      }
-    },
-    "XLM": {
-      "trades": 111,
-      "wins": 20,
-      "net_pnl_usdc": -51.2458,
-      "profit_factor": 0.2106,
-      "max_drawdown": 0.5125,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 599,
-        "LONG": 0,
-        "SHORT": 111,
-        "CLOSE": 146
-      },
-      "in_position_policy_actions": {
-        "WAIT": 62,
-        "LONG": 0,
-        "SHORT": 201,
-        "CLOSE": 32
-      }
-    },
-    "XMR": {
-      "trades": 82,
-      "wins": 21,
-      "net_pnl_usdc": -36.8715,
-      "profit_factor": 0.4017,
-      "max_drawdown": 0.3881,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 632,
-        "LONG": 0,
-        "SHORT": 82,
-        "CLOSE": 83
-      },
-      "in_position_policy_actions": {
-        "WAIT": 58,
-        "LONG": 0,
-        "SHORT": 276,
-        "CLOSE": 20
-      }
-    },
-    "XPL": {
-      "trades": 120,
-      "wins": 33,
-      "net_pnl_usdc": -38.6488,
-      "profit_factor": 0.5735,
-      "max_drawdown": 0.4298,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 517,
-        "LONG": 0,
-        "SHORT": 120,
-        "CLOSE": 69
-      },
-      "in_position_policy_actions": {
-        "WAIT": 104,
-        "LONG": 0,
-        "SHORT": 315,
-        "CLOSE": 26
-      }
-    },
-    "XRP": {
-      "trades": 91,
-      "wins": 16,
-      "net_pnl_usdc": -40.3238,
-      "profit_factor": 0.2403,
-      "max_drawdown": 0.4055,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 646,
-        "LONG": 0,
-        "SHORT": 91,
-        "CLOSE": 154
-      },
-      "in_position_policy_actions": {
-        "WAIT": 41,
-        "LONG": 0,
-        "SHORT": 192,
-        "CLOSE": 27
-      }
-    },
-    "ZEC": {
-      "trades": 110,
-      "wins": 32,
-      "net_pnl_usdc": -25.472,
-      "profit_factor": 0.7634,
-      "max_drawdown": 0.2886,
-      "holdout_candles": 1192,
-      "flat_policy_actions": {
-        "WAIT": 548,
-        "LONG": 0,
-        "SHORT": 110,
+        "WAIT": 786,
+        "LONG": 12,
+        "SHORT": 22,
         "CLOSE": 34
       },
       "in_position_policy_actions": {
-        "WAIT": 107,
-        "LONG": 0,
-        "SHORT": 336,
-        "CLOSE": 16
+        "WAIT": 253,
+        "LONG": 29,
+        "SHORT": 13,
+        "CLOSE": 2
       }
     },
-    "ZRO": {
-      "trades": 97,
-      "wins": 30,
-      "net_pnl_usdc": -19.796,
-      "profit_factor": 0.8023,
-      "max_drawdown": 0.2887,
+    "APT": {
+      "trades": 34,
+      "wins": 15,
+      "net_pnl_usdc": -3.728,
+      "profit_factor": 0.8766,
+      "max_drawdown": 0.1827,
       "holdout_candles": 1192,
       "flat_policy_actions": {
-        "WAIT": 464,
+        "WAIT": 888,
+        "LONG": 11,
+        "SHORT": 23,
+        "CLOSE": 35
+      },
+      "in_position_policy_actions": {
+        "WAIT": 151,
+        "LONG": 25,
+        "SHORT": 13,
+        "CLOSE": 5
+      }
+    },
+    "ARB": {
+      "trades": 37,
+      "wins": 13,
+      "net_pnl_usdc": -10.411,
+      "profit_factor": 0.7109,
+      "max_drawdown": 0.1378,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 986,
+        "LONG": 23,
+        "SHORT": 14,
+        "CLOSE": 27
+      },
+      "in_position_policy_actions": {
+        "WAIT": 69,
+        "LONG": 27,
+        "SHORT": 5,
+        "CLOSE": 0
+      }
+    },
+    "ASTER": {
+      "trades": 23,
+      "wins": 7,
+      "net_pnl_usdc": -11.7568,
+      "profit_factor": 0.2513,
+      "max_drawdown": 0.1176,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 940,
+        "LONG": 9,
+        "SHORT": 14,
+        "CLOSE": 88
+      },
+      "in_position_policy_actions": {
+        "WAIT": 81,
+        "LONG": 13,
+        "SHORT": 1,
+        "CLOSE": 5
+      }
+    },
+    "AVAX": {
+      "trades": 30,
+      "wins": 7,
+      "net_pnl_usdc": -16.6164,
+      "profit_factor": 0.3978,
+      "max_drawdown": 0.1782,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 927,
+        "LONG": 14,
+        "SHORT": 16,
+        "CLOSE": 70
+      },
+      "in_position_policy_actions": {
+        "WAIT": 92,
+        "LONG": 22,
+        "SHORT": 8,
+        "CLOSE": 2
+      }
+    },
+    "BNB": {
+      "trades": 4,
+      "wins": 4,
+      "net_pnl_usdc": 1.3885,
+      "profit_factor": null,
+      "max_drawdown": 0.0048,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 1011,
+        "LONG": 2,
+        "SHORT": 2,
+        "CLOSE": 112
+      },
+      "in_position_policy_actions": {
+        "WAIT": 14,
+        "LONG": 9,
+        "SHORT": 0,
+        "CLOSE": 1
+      }
+    },
+    "BTC": {
+      "trades": 2,
+      "wins": 1,
+      "net_pnl_usdc": 0.9023,
+      "profit_factor": 3.5443,
+      "max_drawdown": 0.0099,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 1041,
+        "LONG": 1,
+        "SHORT": 1,
+        "CLOSE": 90
+      },
+      "in_position_policy_actions": {
+        "WAIT": 17,
         "LONG": 0,
-        "SHORT": 97,
+        "SHORT": 0,
+        "CLOSE": 1
+      }
+    },
+    "CASHCAT": {
+      "trades": 41,
+      "wins": 15,
+      "net_pnl_usdc": -9.3726,
+      "profit_factor": 0.839,
+      "max_drawdown": 0.2123,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 863,
+        "LONG": 15,
+        "SHORT": 26,
+        "CLOSE": 6
+      },
+      "in_position_policy_actions": {
+        "WAIT": 211,
+        "LONG": 18,
+        "SHORT": 12,
+        "CLOSE": 0
+      }
+    },
+    "CRV": {
+      "trades": 40,
+      "wins": 13,
+      "net_pnl_usdc": -9.0777,
+      "profit_factor": 0.771,
+      "max_drawdown": 0.1889,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 927,
+        "LONG": 23,
+        "SHORT": 17,
+        "CLOSE": 29
+      },
+      "in_position_policy_actions": {
+        "WAIT": 116,
+        "LONG": 35,
+        "SHORT": 3,
+        "CLOSE": 1
+      }
+    },
+    "DOT": {
+      "trades": 53,
+      "wins": 21,
+      "net_pnl_usdc": -14.8116,
+      "profit_factor": 0.6883,
+      "max_drawdown": 0.1519,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 754,
+        "LONG": 26,
+        "SHORT": 27,
+        "CLOSE": 29
+      },
+      "in_position_policy_actions": {
+        "WAIT": 240,
+        "LONG": 52,
+        "SHORT": 15,
+        "CLOSE": 8
+      }
+    },
+    "ENA": {
+      "trades": 28,
+      "wins": 11,
+      "net_pnl_usdc": 3.4792,
+      "profit_factor": 1.1157,
+      "max_drawdown": 0.1352,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 804,
+        "LONG": 13,
+        "SHORT": 15,
+        "CLOSE": 28
+      },
+      "in_position_policy_actions": {
+        "WAIT": 252,
+        "LONG": 26,
+        "SHORT": 12,
+        "CLOSE": 1
+      }
+    },
+    "ETH": {
+      "trades": 11,
+      "wins": 3,
+      "net_pnl_usdc": -8.0377,
+      "profit_factor": 0.2322,
+      "max_drawdown": 0.0939,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 1009,
+        "LONG": 5,
+        "SHORT": 6,
+        "CLOSE": 87
+      },
+      "in_position_policy_actions": {
+        "WAIT": 39,
+        "LONG": 3,
+        "SHORT": 1,
+        "CLOSE": 1
+      }
+    },
+    "ETHFI": {
+      "trades": 58,
+      "wins": 17,
+      "net_pnl_usdc": -38.391,
+      "profit_factor": 0.3859,
+      "max_drawdown": 0.3957,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 860,
+        "LONG": 31,
+        "SHORT": 27,
+        "CLOSE": 32
+      },
+      "in_position_policy_actions": {
+        "WAIT": 140,
+        "LONG": 42,
+        "SHORT": 14,
+        "CLOSE": 5
+      }
+    },
+    "FARTCOIN": {
+      "trades": 26,
+      "wins": 6,
+      "net_pnl_usdc": -21.4971,
+      "profit_factor": 0.3439,
+      "max_drawdown": 0.2332,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 926,
+        "LONG": 8,
+        "SHORT": 18,
+        "CLOSE": 43
+      },
+      "in_position_policy_actions": {
+        "WAIT": 138,
+        "LONG": 12,
+        "SHORT": 6,
+        "CLOSE": 0
+      }
+    },
+    "FIL": {
+      "trades": 35,
+      "wins": 14,
+      "net_pnl_usdc": -2.4328,
+      "profit_factor": 0.9286,
+      "max_drawdown": 0.1092,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 835,
+        "LONG": 8,
+        "SHORT": 27,
+        "CLOSE": 21
+      },
+      "in_position_policy_actions": {
+        "WAIT": 231,
+        "LONG": 15,
+        "SHORT": 12,
+        "CLOSE": 2
+      }
+    },
+    "GRASS": {
+      "trades": 39,
+      "wins": 9,
+      "net_pnl_usdc": -34.5259,
+      "profit_factor": 0.3831,
+      "max_drawdown": 0.3532,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 738,
+        "LONG": 16,
+        "SHORT": 23,
+        "CLOSE": 22
+      },
+      "in_position_policy_actions": {
+        "WAIT": 294,
+        "LONG": 33,
+        "SHORT": 23,
+        "CLOSE": 2
+      }
+    },
+    "INJ": {
+      "trades": 36,
+      "wins": 9,
+      "net_pnl_usdc": -36.0493,
+      "profit_factor": 0.3452,
+      "max_drawdown": 0.3706,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 928,
+        "LONG": 15,
+        "SHORT": 21,
+        "CLOSE": 14
+      },
+      "in_position_policy_actions": {
+        "WAIT": 149,
+        "LONG": 17,
+        "SHORT": 7,
+        "CLOSE": 0
+      }
+    },
+    "JUP": {
+      "trades": 31,
+      "wins": 12,
+      "net_pnl_usdc": -3.2061,
+      "profit_factor": 0.8366,
+      "max_drawdown": 0.1136,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 970,
+        "LONG": 17,
+        "SHORT": 14,
+        "CLOSE": 51
+      },
+      "in_position_policy_actions": {
+        "WAIT": 71,
+        "LONG": 23,
+        "SHORT": 2,
+        "CLOSE": 3
+      }
+    },
+    "LINK": {
+      "trades": 15,
+      "wins": 7,
+      "net_pnl_usdc": -1.9606,
+      "profit_factor": 0.8141,
+      "max_drawdown": 0.0483,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 988,
+        "LONG": 5,
+        "SHORT": 10,
+        "CLOSE": 68
+      },
+      "in_position_policy_actions": {
+        "WAIT": 66,
+        "LONG": 12,
+        "SHORT": 1,
+        "CLOSE": 1
+      }
+    },
+    "LIT": {
+      "trades": 46,
+      "wins": 20,
+      "net_pnl_usdc": -3.9289,
+      "profit_factor": 0.9044,
+      "max_drawdown": 0.15,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 865,
+        "LONG": 28,
+        "SHORT": 18,
+        "CLOSE": 25
+      },
+      "in_position_policy_actions": {
+        "WAIT": 155,
+        "LONG": 36,
+        "SHORT": 18,
+        "CLOSE": 6
+      }
+    },
+    "LTC": {
+      "trades": 16,
+      "wins": 4,
+      "net_pnl_usdc": -8.8103,
+      "profit_factor": 0.3863,
+      "max_drawdown": 0.1115,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 976,
+        "LONG": 6,
+        "SHORT": 10,
+        "CLOSE": 67
+      },
+      "in_position_policy_actions": {
+        "WAIT": 70,
+        "LONG": 19,
+        "SHORT": 1,
+        "CLOSE": 2
+      }
+    },
+    "MORPHO": {
+      "trades": 37,
+      "wins": 14,
+      "net_pnl_usdc": -8.5611,
+      "profit_factor": 0.7078,
+      "max_drawdown": 0.1275,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 820,
+        "LONG": 19,
+        "SHORT": 18,
+        "CLOSE": 42
+      },
+      "in_position_policy_actions": {
+        "WAIT": 206,
+        "LONG": 35,
+        "SHORT": 6,
+        "CLOSE": 5
+      }
+    },
+    "NEAR": {
+      "trades": 35,
+      "wins": 15,
+      "net_pnl_usdc": -3.9019,
+      "profit_factor": 0.8934,
+      "max_drawdown": 0.124,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 956,
+        "LONG": 19,
+        "SHORT": 16,
+        "CLOSE": 15
+      },
+      "in_position_policy_actions": {
+        "WAIT": 111,
+        "LONG": 19,
+        "SHORT": 13,
+        "CLOSE": 2
+      }
+    },
+    "NIL": {
+      "trades": 52,
+      "wins": 19,
+      "net_pnl_usdc": -15.6789,
+      "profit_factor": 0.7588,
+      "max_drawdown": 0.2723,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 791,
+        "LONG": 23,
+        "SHORT": 29,
+        "CLOSE": 17
+      },
+      "in_position_policy_actions": {
+        "WAIT": 217,
+        "LONG": 41,
+        "SHORT": 31,
+        "CLOSE": 2
+      }
+    },
+    "ONDO": {
+      "trades": 35,
+      "wins": 10,
+      "net_pnl_usdc": -11.5846,
+      "profit_factor": 0.6216,
+      "max_drawdown": 0.1504,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 900,
+        "LONG": 11,
+        "SHORT": 24,
+        "CLOSE": 42
+      },
+      "in_position_policy_actions": {
+        "WAIT": 148,
+        "LONG": 17,
+        "SHORT": 6,
+        "CLOSE": 3
+      }
+    },
+    "PAXG": {
+      "trades": 1,
+      "wins": 0,
+      "net_pnl_usdc": -0.576,
+      "profit_factor": 0.0,
+      "max_drawdown": 0.0058,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 988,
+        "LONG": 1,
+        "SHORT": 0,
+        "CLOSE": 162
+      },
+      "in_position_policy_actions": {
+        "WAIT": 0,
+        "LONG": 0,
+        "SHORT": 0,
+        "CLOSE": 0
+      }
+    },
+    "PENDLE": {
+      "trades": 40,
+      "wins": 17,
+      "net_pnl_usdc": -8.6581,
+      "profit_factor": 0.7131,
+      "max_drawdown": 0.1143,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 824,
+        "LONG": 23,
+        "SHORT": 17,
         "CLOSE": 41
       },
       "in_position_policy_actions": {
-        "WAIT": 135,
-        "LONG": 0,
-        "SHORT": 391,
+        "WAIT": 185,
+        "LONG": 38,
+        "SHORT": 15,
+        "CLOSE": 8
+      }
+    },
+    "PONS": {
+      "trades": 41,
+      "wins": 16,
+      "net_pnl_usdc": 4.8703,
+      "profit_factor": 1.0959,
+      "max_drawdown": 0.1076,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 782,
+        "LONG": 15,
+        "SHORT": 26,
+        "CLOSE": 3
+      },
+      "in_position_policy_actions": {
+        "WAIT": 270,
+        "LONG": 31,
+        "SHORT": 22,
+        "CLOSE": 2
+      }
+    },
+    "PUMP": {
+      "trades": 36,
+      "wins": 16,
+      "net_pnl_usdc": -4.5377,
+      "profit_factor": 0.8936,
+      "max_drawdown": 0.2536,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 874,
+        "LONG": 21,
+        "SHORT": 15,
+        "CLOSE": 8
+      },
+      "in_position_policy_actions": {
+        "WAIT": 180,
+        "LONG": 41,
+        "SHORT": 10,
+        "CLOSE": 2
+      }
+    },
+    "PYTH": {
+      "trades": 42,
+      "wins": 13,
+      "net_pnl_usdc": -12.0139,
+      "profit_factor": 0.7716,
+      "max_drawdown": 0.1647,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 771,
+        "LONG": 15,
+        "SHORT": 27,
+        "CLOSE": 24
+      },
+      "in_position_policy_actions": {
+        "WAIT": 248,
+        "LONG": 48,
+        "SHORT": 17,
+        "CLOSE": 1
+      }
+    },
+    "SAND": {
+      "trades": 48,
+      "wins": 11,
+      "net_pnl_usdc": -26.9213,
+      "profit_factor": 0.5686,
+      "max_drawdown": 0.2954,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 871,
+        "LONG": 24,
+        "SHORT": 24,
+        "CLOSE": 21
+      },
+      "in_position_policy_actions": {
+        "WAIT": 176,
+        "LONG": 23,
+        "SHORT": 10,
+        "CLOSE": 2
+      }
+    },
+    "SOL": {
+      "trades": 16,
+      "wins": 4,
+      "net_pnl_usdc": -6.3703,
+      "profit_factor": 0.4505,
+      "max_drawdown": 0.0722,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 1012,
+        "LONG": 10,
+        "SHORT": 6,
+        "CLOSE": 59
+      },
+      "in_position_policy_actions": {
+        "WAIT": 47,
+        "LONG": 12,
+        "SHORT": 3,
+        "CLOSE": 2
+      }
+    },
+    "STRK": {
+      "trades": 29,
+      "wins": 10,
+      "net_pnl_usdc": 8.9232,
+      "profit_factor": 1.219,
+      "max_drawdown": 0.2098,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 904,
+        "LONG": 8,
+        "SHORT": 21,
+        "CLOSE": 6
+      },
+      "in_position_policy_actions": {
+        "WAIT": 201,
+        "LONG": 4,
+        "SHORT": 5,
+        "CLOSE": 2
+      }
+    },
+    "SUI": {
+      "trades": 29,
+      "wins": 12,
+      "net_pnl_usdc": 0.3271,
+      "profit_factor": 1.0147,
+      "max_drawdown": 0.1074,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 897,
+        "LONG": 14,
+        "SHORT": 15,
+        "CLOSE": 44
+      },
+      "in_position_policy_actions": {
+        "WAIT": 154,
+        "LONG": 22,
+        "SHORT": 3,
+        "CLOSE": 2
+      }
+    },
+    "TAO": {
+      "trades": 32,
+      "wins": 8,
+      "net_pnl_usdc": -17.2658,
+      "profit_factor": 0.4324,
+      "max_drawdown": 0.1968,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 910,
+        "LONG": 15,
+        "SHORT": 17,
+        "CLOSE": 49
+      },
+      "in_position_policy_actions": {
+        "WAIT": 120,
+        "LONG": 28,
+        "SHORT": 8,
+        "CLOSE": 4
+      }
+    },
+    "TIA": {
+      "trades": 47,
+      "wins": 16,
+      "net_pnl_usdc": -14.0882,
+      "profit_factor": 0.777,
+      "max_drawdown": 0.2341,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 801,
+        "LONG": 25,
+        "SHORT": 22,
+        "CLOSE": 12
+      },
+      "in_position_policy_actions": {
+        "WAIT": 261,
+        "LONG": 18,
+        "SHORT": 9,
+        "CLOSE": 3
+      }
+    },
+    "UNI": {
+      "trades": 26,
+      "wins": 10,
+      "net_pnl_usdc": -4.9915,
+      "profit_factor": 0.7826,
+      "max_drawdown": 0.0768,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 926,
+        "LONG": 11,
+        "SHORT": 15,
+        "CLOSE": 44
+      },
+      "in_position_policy_actions": {
+        "WAIT": 137,
+        "LONG": 15,
+        "SHORT": 1,
+        "CLOSE": 2
+      }
+    },
+    "VVV": {
+      "trades": 38,
+      "wins": 14,
+      "net_pnl_usdc": -15.3152,
+      "profit_factor": 0.6466,
+      "max_drawdown": 0.2088,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 870,
+        "LONG": 16,
+        "SHORT": 22,
         "CLOSE": 23
+      },
+      "in_position_policy_actions": {
+        "WAIT": 196,
+        "LONG": 17,
+        "SHORT": 5,
+        "CLOSE": 2
+      }
+    },
+    "WLD": {
+      "trades": 49,
+      "wins": 24,
+      "net_pnl_usdc": 1.9975,
+      "profit_factor": 1.0382,
+      "max_drawdown": 0.1454,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 797,
+        "LONG": 30,
+        "SHORT": 19,
+        "CLOSE": 19
+      },
+      "in_position_policy_actions": {
+        "WAIT": 235,
+        "LONG": 40,
+        "SHORT": 10,
+        "CLOSE": 1
+      }
+    },
+    "XMR": {
+      "trades": 42,
+      "wins": 14,
+      "net_pnl_usdc": -14.2099,
+      "profit_factor": 0.5942,
+      "max_drawdown": 0.1748,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 871,
+        "LONG": 24,
+        "SHORT": 18,
+        "CLOSE": 34
+      },
+      "in_position_policy_actions": {
+        "WAIT": 160,
+        "LONG": 37,
+        "SHORT": 3,
+        "CLOSE": 4
+      }
+    },
+    "XPL": {
+      "trades": 23,
+      "wins": 8,
+      "net_pnl_usdc": -3.0462,
+      "profit_factor": 0.8467,
+      "max_drawdown": 0.0805,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 942,
+        "LONG": 9,
+        "SHORT": 14,
+        "CLOSE": 35
+      },
+      "in_position_policy_actions": {
+        "WAIT": 123,
+        "LONG": 20,
+        "SHORT": 5,
+        "CLOSE": 3
+      }
+    },
+    "XRP": {
+      "trades": 10,
+      "wins": 4,
+      "net_pnl_usdc": -0.0229,
+      "profit_factor": 0.9965,
+      "max_drawdown": 0.0269,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 995,
+        "LONG": 4,
+        "SHORT": 6,
+        "CLOSE": 73
+      },
+      "in_position_policy_actions": {
+        "WAIT": 58,
+        "LONG": 11,
+        "SHORT": 4,
+        "CLOSE": 0
+      }
+    },
+    "ZEC": {
+      "trades": 36,
+      "wins": 16,
+      "net_pnl_usdc": -4.9601,
+      "profit_factor": 0.8648,
+      "max_drawdown": 0.1293,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 919,
+        "LONG": 20,
+        "SHORT": 16,
+        "CLOSE": 19
+      },
+      "in_position_policy_actions": {
+        "WAIT": 136,
+        "LONG": 34,
+        "SHORT": 7,
+        "CLOSE": 0
+      }
+    },
+    "ZRO": {
+      "trades": 41,
+      "wins": 13,
+      "net_pnl_usdc": -22.7177,
+      "profit_factor": 0.628,
+      "max_drawdown": 0.2902,
+      "holdout_candles": 1192,
+      "flat_policy_actions": {
+        "WAIT": 768,
+        "LONG": 13,
+        "SHORT": 28,
+        "CLOSE": 18
+      },
+      "in_position_policy_actions": {
+        "WAIT": 278,
+        "LONG": 29,
+        "SHORT": 17,
+        "CLOSE": 0
       }
     }
   },
   "training_algorithm": "PPO",
-  "steps": 55296,
-  "current_run_steps": 55296,
+  "steps": 47104,
+  "current_run_steps": 47104,
   "parent_version": null,
   "training_checkpoint_file": "ppo_model.zip",
-  "training_checkpoint_sha256": "55f48e5f83c377c1c6ff67771173734d9aaf292b19fcbf8efd6da2ef3389fe9f",
+  "training_checkpoint_sha256": "66d59d464c19e910bdbd4a460c00732bad610abf855d7da3b62103da411f0255",
   "requested_steps": 20000,
   "symbol_sampling": "balanced_round_robin_512_bar_episodes",
   "reward_contract": "scaled_log_equity_return_minus_incremental_drawdown_v1",
@@ -1234,9 +1058,9 @@
     "reason": "no_private_feedback_supplied"
   },
   "candidate_quality": {
-    "trades": 5133,
-    "net_pnl_sum_of_independent_100usd_accounts": -1662.0448,
-    "markets": 54,
+    "trades": 1471,
+    "net_pnl_sum_of_independent_100usd_accounts": -388.4418,
+    "markets": 46,
     "candidate_quality_reasons": [
       "NEGATIVE_OR_FLAT_HOLDOUT_PNL",
       "EXCESSIVE_INDIVIDUAL_DRAWDOWN"
@@ -1253,62 +1077,54 @@
     "assumed_spread_bps": 1
   },
   "universe_source": "LIVE_SCANNER_PREFILTER",
-  "universe_snapshot_timestamp_ms": 1792434000000,
+  "universe_snapshot_timestamp_ms": 1792471200000,
   "universe_requested_symbols": [
-    "PUMP",
     "WLD",
-    "ZRO",
-    "ARB",
-    "VVV",
     "NEAR",
+    "ARB",
     "ZEC",
-    "ENA",
+    "PUMP",
+    "XMR",
+    "BTC",
+    "ETH",
     "XRP",
     "SOL",
-    "ETH",
-    "BTC",
-    "XMR",
-    "LIT",
-    "SUI",
-    "CRV",
-    "INJ",
-    "UNI",
-    "FARTCOIN",
-    "ONDO",
+    "ENA",
     "STRK",
-    "TAO",
-    "XPL",
+    "CRV",
+    "ZRO",
+    "VVV",
+    "SUI",
     "PONS",
+    "LIT",
+    "UNI",
+    "TAO",
+    "ONDO",
+    "INJ",
     "AAVE",
+    "CASHCAT",
+    "FARTCOIN",
+    "XPL",
     "LINK",
     "BNB",
-    "LTC",
+    "AVAX",
     "AERO",
-    "CASHCAT",
     "ADA",
     "GRASS",
-    "MON",
-    "DOT",
+    "LTC",
+    "NIL",
     "MORPHO",
     "ASTER",
-    "ETHFI",
-    "NIL",
-    "GRAM",
-    "AVAX",
-    "HBAR",
     "PAXG",
-    "JUP",
-    "CHIP",
+    "ETHFI",
     "TIA",
-    "XLM",
-    "TRX",
+    "PENDLE",
     "FIL",
-    "FET",
-    "SPX",
-    "APT",
+    "DOT",
+    "SAND",
+    "JUP",
     "PYTH",
-    "USELESS",
-    "SAND"
+    "APT"
   ],
   "universe_excluded": {},
   "universe_coverage": 1.0

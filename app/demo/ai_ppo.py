@@ -1,0 +1,311 @@
+"""Trading X DEMO: independent, fail-closed PPO inference. Never executes LIVE orders.
+
+Training and inference use the same observation function. The model chooses
+WAIT/LONG/SHORT/CLOSE and ATR-based SL/TP multipliers (MultiDiscrete 4/3/3).
+Risk limits are deterministic safety controls, not trading signals.
+"""
+from __future__ import annotations
+
+from collections import defaultdict, deque
+from copy import deepcopy
+from dataclasses import dataclass
+from hashlib import sha256
+import json
+import math
+import os
+from pathlib import Path
+from threading import RLock
+import time
+import uuid
+
+from app.config import (
+    LEVERAGE, MIN_CAPITAL_USDC, POSITION_PERCENT, MAX_TRADE_MARGIN_USDC,
+    EXECUTION_MAX_SPREAD_BPS,
+)
+from app.demo.simulator import valid_quote, fill_price, fee_usdc, _money, _quantity
+from app.demo.ledger import now_iso
+from app.demo.ai_experience import clean_observation
+from app.demo.ai_online import PaperFeedbackActor
+from app.demo.settings import DEMO_TAKER_FEE_BPS, DEMO_SLIPPAGE_BPS
+
+from app.demo.ai_features import (
+    BAR_MS, OBS_NAMES, ACTIONS, STOP_ATR, TAKE_ATR, MODEL_SCHEMA,
+    CandleStore, configured_symbols, observation,
+    ADVANCED_OBS_NAMES, ADVANCED_ACTIONS, ADVANCED_MODEL_SCHEMA,
+    ADVANCED_HISTORY_BARS, advanced_observation,
+)
+from app.demo.ai_v4 import SKILLS_MODEL_SCHEMA, SKILLS_OBS_NAMES, skills_observation
+
+
+def _linear(x: list[float], layer: dict) -> list[float]:
+    weights = layer["weight"]
+    bias = layer["bias"]
+    if len(weights) != len(bias) or any(len(row) != len(x) for row in weights):
+        raise ValueError("actor_layer_shape_mismatch")
+    return [sum(a*b for a, b in zip(x, row)) + float(b) for row, b in zip(weights, bias)]
+
+
+def _softmax(xs: list[float]) -> list[float]:
+    m = max(xs)
+    e = [math.exp(v-m) for v in xs]
+    return [v/sum(e) for v in e]
+
+
+@dataclass(frozen=True)
+class Decision:
+    symbol: str
+    action: str
+    stop_atr: float
+    take_atr: float
+    probability: float
+    model_version: str
+    selection: str = "PPO_ARGMAX"
+
+
+class PPOPolicy:
+    """Portable inference: no torch in Railway; SHA256-checked JSON actor."""
+    def __init__(self, manifest_path: str):
+        path = Path(manifest_path)
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        schema = meta.get("schema")
+        self.v4 = schema == SKILLS_MODEL_SCHEMA
+        self.advanced = schema in (ADVANCED_MODEL_SCHEMA, SKILLS_MODEL_SCHEMA)
+        self.obs_names = (SKILLS_OBS_NAMES if self.v4 else
+                          ADVANCED_OBS_NAMES if self.advanced else OBS_NAMES)
+        self.actions = ADVANCED_ACTIONS if self.advanced else ACTIONS
+        self.lookback = ADVANCED_HISTORY_BARS if self.advanced else 40
+        if (schema not in (MODEL_SCHEMA, ADVANCED_MODEL_SCHEMA, SKILLS_MODEL_SCHEMA)
+                or meta.get("observation_names") != list(self.obs_names)):
+            raise ValueError("PPO model/observation schema mismatch")
+        # The user may explicitly opt into PAPER-ONLY research with an
+        # unapproved model. Negative/unknown PnL is acceptable for simulated
+        # learning but NEVER a claim of profitability or LIVE authorization.
+        is_approved = meta.get("approved_for_demo") is True
+        research_only = (meta.get("approved_for_demo") is False and
+                         os.getenv("DEMO_AI_PAPER_RESEARCH_MODE", "").lower() == "true" and
+                         os.getenv("DEMO_WORKER_MODE", "").lower() == "true" and
+                         os.getenv("DEMO_ENABLED", "").lower() == "true" and
+                         os.getenv("DEMO_DECISION_ENGINE", "ai_ppo").lower() == "ai_ppo")
+        if not is_approved and not research_only:
+            raise ValueError("PPO model not approved for demo; paper research requires explicit isolated opt-in")
+        self.research_only = bool(research_only)
+        if meta.get("action_dims") != [len(self.actions), 3, 3]:
+            raise ValueError("PPO action schema mismatch")
+        cap = float(os.getenv("DEMO_AI_MAX_MARGIN_USDC", "25"))
+        effective_cap = min(cap, MAX_TRADE_MARGIN_USDC) if MAX_TRADE_MARGIN_USDC > 0 else cap
+        profile = meta.get("runtime_profile")
+        if (not isinstance(profile, dict) or
+            profile.get("leverage") != LEVERAGE or
+            float(profile.get("position_percent", -1)) != POSITION_PERCENT or
+            float(profile.get("margin_cap_usdc", -1)) != effective_cap or
+            float(profile.get("taker_fee_bps", -1)) != DEMO_TAKER_FEE_BPS or
+            float(profile.get("slippage_bps", -1)) != DEMO_SLIPPAGE_BPS):
+            raise ValueError("AI training/runtime risk profile mismatch: retrain before deploy")
+        filename = meta.get("actor_file")
+        if filename != "actor.json":
+            raise ValueError("actor filename forbidden")
+        actor_path = path.parent / filename
+        raw = actor_path.read_bytes()
+        if sha256(raw).hexdigest() != meta.get("actor_sha256"):
+            raise ValueError("PPO actor integrity mismatch")
+        actor = json.loads(raw)
+        if actor.get("activation") != "tanh" or len(actor.get("hidden", [])) != 2:
+            raise ValueError("unsupported PPO actor architecture")
+        if len(actor["hidden"][0]["weight"][0]) != len(self.obs_names):
+            raise ValueError("actor input shape")
+        if len(actor["head"]["weight"]) != len(self.actions) + 6:
+            raise ValueError("actor output shape")
+        self.layers = actor["hidden"]
+        self.head = actor["head"]
+        self.version = str(meta["version"])
+        symbols = meta.get("trained_symbols", [])
+        if not symbols or not isinstance(symbols, list):
+            raise ValueError("missing training symbols")
+        self.symbols = set(symbols)
+        self.feedback = PaperFeedbackActor(size=len(self.layers[-1]["bias"]), actions=self.actions)
+        self.feedback_lock = RLock()
+
+    def _features(self, obs: list[float]) -> tuple[list[float], list[float]]:
+        x = obs
+        for layer in self.layers:
+            x = [math.tanh(y) for y in _linear(x, layer)]
+        return x, _linear(x, self.head)
+
+    def observe_closed_trade(self, record: dict) -> bool:
+        """Learn once from a closed DEMO trade; never pretend this is PPO replay."""
+        if record.get("model_version") != self.version or record.get("symbol") not in self.symbols:
+            return False
+        with self.feedback_lock:
+            return self.feedback.learn(record, self._features)
+
+    def restore_closed_trades(self, records) -> dict:
+        """Reconstruct bounded learned corrections deterministically after restart."""
+        with self.feedback_lock:
+            self.feedback = PaperFeedbackActor(size=len(self.layers[-1]["bias"]), actions=self.actions)
+            for record in records:
+                self.observe_closed_trade(record)
+            return self.feedback.snapshot()
+
+    def observe(self, candles, bid: float, ask: float, position=None):
+        """Version-locked observations exactly matching the PPO trainer."""
+        if self.v4:
+            return skills_observation(candles, bid, ask, position)
+        if self.advanced:
+            return advanced_observation(candles, bid, ask, position)
+        return observation(candles, bid, ask, position)
+
+    def _active_paper_entry(self, obs: list[float], logits: list[float]) -> int | None:
+        """Deterministic V4 research-only direction when WAIT dominates.
+
+        Direction still comes from the PPO actor's LONG/SHORT head. Closed-bar
+        technical context vetoes unsupported directions; no random selection,
+        fixed signals, future candles, LIVE routing or guaranteed trades.
+        Returns None if neither side has enough independent market support.
+        """
+        idx = {name: i for i, name in enumerate(self.obs_names)}
+        direction = 1 if logits[1] > logits[2] else 2
+        chosen = _softmax([logits[1], logits[2]])[direction-1]
+        if chosen < 0.54:
+            return None
+        side = 1 if direction == 1 else -1
+        feature = lambda name: float(obs[idx[name]])
+        m5 = side*feature("m5_ema9_21_pct")
+        m15 = side*feature("m15_ema9_21_pct")
+        h1 = side*feature("h1_ema9_21_pct")
+        if m15 < -0.08 or h1 < -0.15:
+            return None  # Avoid obvious higher-timeframe opposition.
+        confirmations = (
+            m5 >= 0.015,
+            m15 >= 0.012,
+            side*feature("m5_market_structure") >= 0.06,
+            side*feature("m5_momentum_shift") >= 0.12,
+            side*feature("mtf_structure_alignment") >= 0.075,
+            feature("m5_breakout_up_atr" if side > 0 else "m5_breakout_down_atr") >= 0.05,
+            side*feature("m5_volume_price_confirmation") >= 0.12,
+        )
+        if sum(confirmations) < 2 or not any(confirmations[:2]):
+            return None
+        return direction
+
+    def predict(self, symbol: str, obs: list[float]) -> Decision:
+        if symbol not in self.symbols or len(obs) != len(self.obs_names) or not all(map(math.isfinite, obs)):
+            raise ValueError("symbol_not_trained_or_bad_features")
+        with self.feedback_lock:
+            x, base_logits = self._features(obs)
+            logits = self.feedback.logits(base_logits, x)
+        primary_count = len(self.actions)
+        selection = "PPO_ARGMAX"
+        if self.advanced:
+            # Only valid state actions: flat -> WAIT/LONG/SHORT, in trade ->
+            # WAIT/CLOSE/PROTECT/TRAIL. No invalid CLOSE while flat.
+            in_position = obs[OBS_NAMES.index("position_sign")] != 0
+            valid = (0, 3, 4, 5) if in_position else (0, 1, 2)
+            masked = [logits[i] if i in valid else -1e9 for i in range(primary_count)]
+            action_p = _softmax(masked)
+            action = max(valid, key=lambda i: action_p[i])
+            if (self.v4 and self.research_only and not in_position
+                    and action == 0 and os.getenv("DEMO_AI_ACTIVE_PAPER_MODE", "true").lower() == "true"):
+                alternate = self._active_paper_entry(obs, logits)
+                if alternate is not None:
+                    action = alternate
+                    selection = "PPO_V4_PAPER_DIRECTIONAL"
+        else:
+            action_p = _softmax(logits[:primary_count])
+            action = max(range(primary_count), key=lambda i: action_p[i])
+        stop = max(range(3), key=lambda i: logits[primary_count+i])
+        take = max(range(3), key=lambda i: logits[primary_count+3+i])
+        # On conditional paper entries log the normalized LONG/SHORT
+        # confidence rather than misleading near-zero unconditional odds.
+        confidence = (_softmax([logits[1], logits[2]])[action-1]
+                      if selection == "PPO_V4_PAPER_DIRECTIONAL"
+                      else action_p[action])
+        return Decision(symbol, self.actions[action], STOP_ATR[stop], TAKE_ATR[take],
+                        confidence, self.version, selection)
+
+
+def ai_gate(account: dict) -> str | None:
+    if not account.get("enabled") or account.get("position"):
+        return "NOT_ELIGIBLE"
+    if float(account.get("balance_usdc") or 0) < MIN_CAPITAL_USDC:
+        return "MIN_CAPITAL"
+    return None
+
+
+def open_ai_position(account: dict, decision: Decision, bid: float, ask: float,
+                     atr: float, *, rejection: dict | None = None,
+                     entry_observation: list[float] | None = None,
+                     decision_candle_ms: int | None = None) -> dict | None:
+    """AI supplies all trade choices. Safety envelope cannot choose trades."""
+    def reject(code):
+        if rejection is not None:
+            rejection["reason"] = code
+        return None
+
+    if ai_gate(account):
+        return reject("ENTRY_GATE")
+    if decision.action not in ("LONG", "SHORT") or not valid_quote(bid, ask):
+        return reject("INVALID_AI_ACTION_OR_QUOTE")
+    if (ask-bid)/bid*10000 > EXECUTION_MAX_SPREAD_BPS:
+        return reject("SPREAD_TOO_WIDE")
+    if not math.isfinite(atr) or atr <= 0:
+        return reject("BAD_AI_ATR")
+    direction = decision.action.lower()
+    entry = fill_price("buy" if direction == "long" else "sell", bid, ask)
+    stop = entry - decision.stop_atr*atr if direction == "long" else entry + decision.stop_atr*atr
+    target = entry + decision.take_atr*atr if direction == "long" else entry - decision.take_atr*atr
+    if stop <= 0 or target <= 0 or not all(map(math.isfinite, (stop, target))):
+        return reject("INVALID_AI_EXITS")
+    balance = float(account["balance_usdc"])
+    # Explicit AI research cap even when the legacy account's margin cap is disabled.
+    ai_margin_cap = float(os.getenv("DEMO_AI_MAX_MARGIN_USDC", "25"))
+    if not math.isfinite(ai_margin_cap) or not 1 <= ai_margin_cap <= 1000:
+        raise ValueError("DEMO_AI_MAX_MARGIN_USDC must be between 1 and 1000")
+    margin = min(balance*POSITION_PERCENT, ai_margin_cap)
+    if MAX_TRADE_MARGIN_USDC > 0:
+        margin = min(margin, MAX_TRADE_MARGIN_USDC)
+    margin = _money(min(margin, balance/(1 + LEVERAGE*DEMO_TAKER_FEE_BPS/10000)-1e-8))
+    if margin <= 0:
+        return reject("NO_MARGIN")
+    notional = margin*LEVERAGE
+    if notional < 10.2:
+        return reject("MIN_NOTIONAL")
+    qty = _quantity(notional/entry)
+    fee = fee_usdc(qty*entry)
+    if qty <= 0 or qty*entry < 10.2 or margin+fee > balance:
+        return reject("MIN_QUANTITY_OR_FEE")
+    new = deepcopy(account)
+    new["balance_usdc"] = _money(balance-fee)
+    new["position"] = {
+        "id": uuid.uuid4().hex, "mode": "DEMO", "symbol": f"{decision.symbol}-PERP",
+        "direction": direction, "entry_price": entry, "quantity": qty,
+        "margin_usdc": margin, "requested_margin_usdc": margin,
+        "leverage": int(LEVERAGE), "notional_usdc": _money(qty*entry),
+        "stop_price": stop, "target_price": target, "initial_stop_price": stop,
+        "rr": round(abs(target-entry)/abs(entry-stop), 4),
+        "strategy_id": "AI_PPO_AUTONOMOUS", "strategy_model": "ppo",
+        "decision_source": "ai_ppo_only", "ai_model_version": decision.model_version,
+        "ai_action_probability": decision.probability,
+        "ai_decision_selection": decision.selection, "ai_bars_held": 0,
+        "ai_last_decision_bar": None, "ai_stop_atr": decision.stop_atr,
+        "ai_take_atr": decision.take_atr, "ai_entry_atr": atr,
+        "ai_trailing_active": False, "ai_stop_moves": 0,
+        "opened_at": now_iso(), "entry_fee_usdc": fee,
+        "demo_be_enabled": False, "demo_be_armed": False,
+        "mark_price": (bid+ask)/2, "unrealized_pnl_usdc": 0.0,
+        "audit_quotes": 0, "audit_mfe_pct": 0.0, "audit_mae_pct": 0.0,
+        "audit_mfe_usdc": 0.0, "audit_mae_usdc": 0.0,
+        "audit_last_quote_at": now_iso(), "audit_max_quote_gap_seconds": 0.0,
+        "audit_quote_gaps_over_10s": 0,
+    }
+    # Exact observed state/action are kept in paper trade history so that
+    # later CLOSED outcome provides real learning feedback, never a made-up label.
+    if entry_observation is not None:
+        if decision_candle_ms is None or int(decision_candle_ms) % BAR_MS:
+            return reject("INVALID_AI_DECISION_CANDLE")
+        new["position"]["ai_entry_observation"] = clean_observation(entry_observation)
+        new["position"]["ai_decision_candle_ms"] = int(decision_candle_ms)
+    new["position_open"] = True
+    new["last_signal_at"] = now_iso()
+    new["last_entry_at"] = now_iso()
+    new["last_error"] = None
+    return new

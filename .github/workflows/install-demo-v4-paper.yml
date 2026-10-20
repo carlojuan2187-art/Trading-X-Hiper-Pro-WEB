@@ -1,0 +1,82 @@
+name: Install vetted-isolation PPO V4 research actor for DEMO
+on:
+  workflow_dispatch:
+# Explicit recovery only, never automatically replace a later research actor.
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: install-demo-v4-paper
+  cancel-in-progress: false
+
+jobs:
+  install-v4:
+    if: github.repository == 'carlojuan2187-art/Trading-X-Hiper-Pro-WEB'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate V2 and V4 runtime compatibility
+        run: |
+          python -m pip install -r requirements.txt
+          python -m compileall -q app/demo tools/ppo_skill_curriculum_v4.py
+          python -m unittest discover -s tests -p 'test_demo_ai_ppo.py' -v
+          python -m unittest discover -s tests -p 'test_ppo_v4_runtime.py' -v
+          python -m unittest discover -s tests -p 'test_ppo_market_skills_v4.py' -v
+      - name: Restore immutable PPO V4 research artifact (GitHub Actions)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "/repos/$GH_REPO/actions/artifacts/12242993756/zip" > /tmp/tradingx-ppo-v4.zip
+          mkdir -p models/trading_x_ppo
+          unzip -p /tmp/tradingx-ppo-v4.zip models/trading_x_ppo_v4_market_skills_research/actor.json > models/trading_x_ppo/actor.json
+          unzip -p /tmp/tradingx-ppo-v4.zip models/trading_x_ppo_v4_market_skills_research/manifest.json > models/trading_x_ppo/manifest.json
+      - name: Strict SHA256, action schema and DEMO-paper-only startup verification
+        env:
+          ADMIN_TELEGRAM_ID: "1"
+          MONGO_URL: "mongodb://127.0.0.1:27017/?serverSelectionTimeoutMS=1000"
+          WEBAPP_SESSION_SECRET: "test-only-session-secret"
+          DEMO_WORKER_MODE: "true"
+          DEMO_ENABLED: "true"
+          DEMO_DECISION_ENGINE: "ai_ppo"
+          DEMO_AI_PAPER_RESEARCH_MODE: "true"
+          DEMO_AI_MAX_MARGIN_USDC: "25"
+          POSITION_PERCENT: "1.0"
+          MAX_TRADE_MARGIN_USDC: "25"
+          LEVERAGE: "10"
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          from app.demo.ai_ppo import PPOPolicy
+          folder = Path('models/trading_x_ppo')
+          meta = json.loads((folder/'manifest.json').read_text())
+          assert meta["version"] == "ppo-v4-1792474705"
+          assert meta["schema"] == "trading_x_ppo_v4_market_curriculum"
+          assert meta["action_dims"] == [6, 3, 3]
+          assert meta["approved_for_demo"] is False
+          assert len(meta["trained_symbols"]) == 46
+          assert hashlib.sha256((folder/'actor.json').read_bytes()).hexdigest() == meta["actor_sha256"]
+          policy = PPOPolicy(str(folder/'manifest.json'))
+          assert policy.v4 and policy.lookback == 480 and policy.research_only
+          quality = meta["candidate_quality"]
+          print("V4_PAPER_ONLY verified actor=%s markets=%s holdout=%s" % (
+              policy.version, len(policy.symbols), quality))
+          PY
+      - name: Commit V4 manifest and actor to isolated DEMO branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f models/trading_x_ppo/actor.json models/trading_x_ppo/manifest.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore(demo): activate PPO V4 research actor, paper-only'
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi

@@ -225,7 +225,8 @@ def open_position(account: dict, selected: dict, bid: float, ask: float,
     return updated
 
 
-def update_position(account: dict, bid: float, ask: float) -> dict | None:
+def update_position(account: dict, bid: float, ask: float, *,
+                    force_close_reason: str | None = None) -> dict | None:
     """Mark-to-market y cierre por TP/SL; bajo gap se cierra a bid/ask, no al trigger.
 
     La posición se gestiona incluso si autoentrada está en pausa.
@@ -248,6 +249,12 @@ def update_position(account: dict, bid: float, ask: float) -> dict | None:
         reason = 'SL' if bid <= stop else 'TP' if bid >= target else None
     else:
         reason = 'SL' if ask >= stop else 'TP' if ask <= target else None
+    # For autonomous DEMO, the model may request a discretionary exit.
+    # A protective SL always takes precedence, then TP, then AI_CLOSE.
+    if reason is None and force_close_reason is not None:
+        if force_close_reason != 'AI_EXIT' or position.get('decision_source') != 'ai_ppo_only':
+            raise ValueError('AI exit requires an AI-owned DEMO position')
+        reason = force_close_reason
     updated = deepcopy(account)
     quote_at = datetime.now(timezone.utc)
     updated['last_tick_at'] = quote_at.isoformat()
@@ -269,6 +276,13 @@ def update_position(account: dict, bid: float, ask: float) -> dict | None:
                     updated['position']['demo_be_armed'] = True
                     updated['position']['demo_be_stop_price'] = candidate
                     updated['position']['demo_be_armed_at'] = quote_at.isoformat()
+    # Only a v3 AI TRAIL action can arm this WS-driven trailing protection.
+    # Protective TP/SL computed above always take precedence.
+    if reason is None and position.get('ai_trailing_active'):
+        from app.demo.ai_stop_management import maybe_follow_trailing
+        moved = maybe_follow_trailing(updated['position'], bid, ask)
+        if moved is not None:
+            updated['position'] = moved
     # Read-only audit measures: use the executable opposite bid/ask after
     # configured slippage, NOT the mid/mark price. Both extremes are gross
     # price excursions; fee-adjusted net PnL is accounted separately.

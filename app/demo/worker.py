@@ -23,6 +23,14 @@ from app.demo.credentials import user_ready
 from app.demo.market_events import decode_book
 from app.demo.simulator import open_position, update_position, entry_gate_reason
 from app.hyperliquid_client import norm_coin
+from app.demo.ai_features import BAR_MS, CandleStore, configured_symbols, observation
+
+# Load AI trading modules ONLY when this runtime enables the AI engine.
+# The legacy offline test harness intentionally stubs app.config.
+DEMO_DECISION_ENGINE = os.getenv("DEMO_DECISION_ENGINE", "ai_ppo").strip().lower()
+AI_DEMO_MODE = DEMO_DECISION_ENGINE == "ai_ppo"
+if AI_DEMO_MODE:
+    from app.demo.ai_ppo import PPOPolicy, ai_gate, open_ai_position
 
 
 def _ws_coin(symbol: str) -> str:
@@ -51,8 +59,56 @@ def acquire_lease() -> bool:
     ).modified_count == 1
 
 
+def activate_owner_paper_once() -> None:
+    """One-time, owner-only DEMO opt-in. Never activates other users or LIVE.
+
+    Off by default. A persistent marker means stopping DEMO later remains
+    respected across restarts even if the bootstrap env flag stays enabled.
+    Called only after the Mongo worker leadership lease is acquired.
+    """
+    if os.getenv("DEMO_AI_OWNER_PAPER_AUTOSTART", "false").strip().lower() != "true":
+        return
+    if not AI_DEMO_MODE or not os.getenv("DEMO_AI_PAPER_RESEARCH_MODE", "").lower() == "true":
+        raise RuntimeError("Owner paper startup requires isolated AI research DEMO")
+    try:
+        owner = int(os.getenv("ADMIN_TELEGRAM_ID") or 0)
+    except ValueError as exc:
+        raise RuntimeError("Invalid owner for paper DEMO startup") from exc
+    if owner <= 0:
+        raise RuntimeError("Owner Telegram ID required for paper DEMO startup")
+    if ledger.COLLECTION.count_documents({"enabled": True}) > 0:
+        logger.info("DEMO_AI_OWNER_PAPER_START skipped=EXISTING_ENABLED_ACCOUNT")
+        return
+    # A human account that has been paused must NOT be restarted on each
+    # deployment. This marker is permanent, separate from trade history.
+    marks = db["demo_ai_owner_autostart"]
+    ident = "ppo_v4_owner_activation_once_20261020"
+    from pymongo.errors import DuplicateKeyError
+    try:
+        marks.insert_one({"_id": ident, "owner": owner,
+                          "created_at": datetime.now(timezone.utc)})
+    except DuplicateKeyError:
+        logger.info("DEMO_AI_OWNER_PAPER_START skipped=ALREADY_CONSUMED")
+        return
+    try:
+        account = ledger.get_or_create(owner)
+        if not account.get("enabled"):
+            account = ledger.change_status(owner, active=True)
+        logger.warning(
+            "DEMO_AI_OWNER_PAPER_STARTED mode=PAPER_ONLY owner=%s eligible=%s balance=%.2f "
+            "autostart=ONE_TIME live_orders=FORBIDDEN",
+            owner, ai_gate(account) is None, float(account.get("balance_usdc") or 0))
+    except Exception:
+        # Don't burn the one-time opportunity when a transient Mongo failure
+        # prevented the requested activation. No other accounts are changed.
+        marks.delete_one({"_id": ident})
+        raise
+
+
 def tick(*, do_scan: bool = False, quote_provider=None, selector=None) -> dict:
-    """Single sequential pass. Selector injected for testability; zero live execution path."""
+    """Historical test adapter only. Production AI never uses this function."""
+    if AI_DEMO_MODE and do_scan:
+        raise RuntimeError("Legacy strategy tick forbidden in AI DEMO mode")
     from app import trading_engine as engine
     if quote_provider is None:
         # Compatibilidad con pruebas históricas: el servicio real NO llama tick().
@@ -123,6 +179,24 @@ class DemoMarketRunner:
 
     def __init__(self):
         self.subscribed: set[str] = set()
+        self.candle_subscribed: set[str] = set()
+        self.ai_policy = (PPOPolicy(os.getenv(
+            "DEMO_AI_MANIFEST", "models/trading_x_ppo/manifest.json"))
+            if AI_DEMO_MODE else None)
+        self.ai_universe = (configured_symbols(self.ai_policy.symbols) if self.ai_policy else ())
+        if self.ai_policy and not set(self.ai_universe).issubset(self.ai_policy.symbols):
+            raise RuntimeError("AI DEMO symbols absent from trained model; refuse legacy fallback")
+        if self.ai_policy is not None:
+            # Rebuild identical online actor corrections after crash/reconnect.
+            # Collection is isolated to Trading X paper-only closed AI trades.
+            records = list(db['demo_ai_experiences'].find(
+                {'model_version': self.ai_policy.version}).sort(
+                'closed_at', 1).limit(10000))
+            restored = self.ai_policy.restore_closed_trades(records)
+            logger.info("DEMO_AI_ONLINE_RESTORED model=%s state=%s",
+                        self.ai_policy.version, json.dumps(restored, sort_keys=True))
+        self.ai_market = CandleStore() if AI_DEMO_MODE else None
+        self.ai_exit_seen: dict[str, int] = {}
         # user_id -> (selected_signal, monotonically-ordered queue timestamp)
         self.pending_by_user: dict[int, tuple[dict, float]] = {}
         self.scan_offset = 0
@@ -132,6 +206,7 @@ class DemoMarketRunner:
         self.audit_flush_at: dict[tuple[int, str], float] = {}
         self.next_scan = time.monotonic()  # scanner es candle-driven, no polling de precios
         self.next_lease = time.monotonic()
+        self.ai_scan_status_at = 0.0  # Throttled operational diagnosis, no account IDs.
 
     @staticmethod
     def trace_trade(event: str, uid: int, position: dict | None, **extra) -> None:
@@ -139,6 +214,8 @@ class DemoMarketRunner:
         p = position or {}
         fields = (
             'id', 'symbol', 'direction', 'strategy_id', 'regime_id',
+            'decision_source', 'ai_model_version', 'ai_action_probability',
+            'ai_stop_atr', 'ai_take_atr',
             'router_decision', 'signal_score', 'scanner_score',
             'signal_reference_price', 'entry_price', 'quantity',
             'stop_price', 'initial_stop_price', 'target_price', 'rr',
@@ -157,6 +234,21 @@ class DemoMarketRunner:
         logger.info('DEMO_TRADE_TRACE event=%s user=%s trade_id=%s symbol=%s data=%s',
                     event, uid, p.get('id', ''), p.get('symbol', ''),
                     json.dumps(payload, sort_keys=True, default=str))
+
+    def learn_closed_paper(self, trade: dict) -> None:
+        """Apply a bounded real-outcome learning step after a saved AI DEMO close."""
+        if self.ai_policy is None or trade.get('decision_source') != 'ai_ppo_only':
+            return
+        from app.demo.ai_experience import build_closed_experience
+        record = build_closed_experience(trade)
+        if record is None:
+            logger.warning("DEMO_AI_ONLINE_SKIPPED reason=incomplete_trade id=%s", trade.get('id'))
+            return
+        if self.ai_policy.observe_closed_trade(record):
+            logger.info("DEMO_AI_ONLINE_LEARNED coin=%s model=%s net_pnl=%.8f "
+                        "state=%s", record['symbol'], record['model_version'],
+                        record['pnl_net_usdc'], json.dumps(
+                            self.ai_policy.feedback.snapshot(), sort_keys=True))
 
     def protected_positions(self, symbol: str, bid: float, ask: float) -> tuple[int, int]:
         marked = closed = 0
@@ -227,6 +319,7 @@ class DemoMarketRunner:
                                     )
                                 }, sort_keys=True, default=str))
                     self.trace_trade('CLOSED', int(account['_id']), trade, bid=bid, ask=ask)
+                    self.learn_closed_paper(trade)
                     closed += 1
                 else:
                     # Keep exact WS extrema between Mongo writes. Periodic
@@ -280,10 +373,18 @@ class DemoMarketRunner:
                 continue
             try:
                 current = ledger.read(uid)
-                if not current or entry_gate_reason(current) is not None or not user_ready(uid):
+                if not current:
+                    continue
+                gate = ai_gate(current) if AI_DEMO_MODE else entry_gate_reason(current)
+                if gate is not None or (not AI_DEMO_MODE and not user_ready(uid)):
                     continue
                 reason: dict = {}
-                updated = open_position(current, selected, bid, ask, rejection=reason)
+                updated = (open_ai_position(current, selected["ai_decision"], bid, ask,
+                                            float(selected["ai_atr"]), rejection=reason,
+                                            entry_observation=selected["ai_entry_observation"],
+                                            decision_candle_ms=selected["ai_decision_candle_ms"])
+                           if AI_DEMO_MODE else open_position(current, selected, bid, ask,
+                                                             rejection=reason))
                 if updated:
                     saved = ledger.save(current, updated)
                     opened += 1
@@ -363,8 +464,156 @@ class DemoMarketRunner:
                 logger.exception('DEMO open failed user=%s', uid)
         return opened
 
+    def collect_ai_signals(self) -> tuple[dict[int, tuple[dict, float]], int]:
+        """Only the learned policy may initiate DEMO entries."""
+        eligible = sorted((a for a in ledger.COLLECTION.find(
+            {"enabled": True, "position": None}) if ai_gate(a) is None),
+            key=lambda a: int(a["_id"]))
+        if not eligible:
+            if time.monotonic() >= self.ai_scan_status_at:
+                self.ai_scan_status_at = time.monotonic() + 60
+                logger.warning("DEMO_AI_SCAN_STATUS eligible=0 enabled=%s reason=NO_ELIGIBLE_PAPER_ACCOUNT",
+                               ledger.COLLECTION.count_documents({"enabled": True}))
+            return {}, self.scan_offset
+        start = self.scan_offset % len(eligible)
+        pool = [eligible[(start+i) % len(eligible)]
+                for i in range(min(len(eligible), DEMO_MAX_USERS_PER_SCAN))]
+        next_offset = (start+len(pool)) % len(eligible)
+        candidates = []
+        ready = 0
+        for coin in self.ai_universe:
+            snap = self.ai_market.snapshot(coin, lookback=self.ai_policy.lookback)
+            if snap is None:
+                continue
+            bars, bid, ask = snap
+            ready += 1
+            try:
+                obs, atr = self.ai_policy.observe(bars, bid, ask)
+                decision = self.ai_policy.predict(coin, obs)
+                logger.info("DEMO_AI_DECISION coin=%s action=%s model=%s prob=%.4f sl_atr=%.2f tp_atr=%.2f",
+                            coin, decision.action, decision.model_version,
+                            decision.probability, decision.stop_atr, decision.take_atr)
+                if decision.action in ("LONG", "SHORT"):
+                    candidates.append((decision.probability, decision, atr, bars[-1]["t"], obs))
+            except (TypeError, ValueError, ZeroDivisionError) as exc:
+                logger.warning("DEMO_AI_OBSERVATION_REJECTED coin=%s reason=%s", coin, exc)
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        if time.monotonic() >= self.ai_scan_status_at:
+            self.ai_scan_status_at = time.monotonic() + 60
+            logger.info("DEMO_AI_SCAN_STATUS eligible=%s markets=%s market_snapshots=%s entry_candidates=%s model=%s",
+                        len(eligible),len(self.ai_universe),ready,len(candidates),self.ai_policy.version)
+        pending = {}
+        for account in pool:
+            last_entry = account.get("last_entry_at")
+            for _, decision, atr, decision_bar, entry_obs in candidates:
+                # At most one entry per completed candle after a previous entry.
+                if last_entry:
+                    try:
+                        last_ms = int(datetime.fromisoformat(last_entry).timestamp()*1000)
+                        if last_ms >= decision_bar + BAR_MS:
+                            continue
+                    except (ValueError, TypeError):
+                        continue
+                pending[int(account["_id"])] = ({
+                    "symbol": f"{decision.symbol}-PERP", "ai_decision": decision,
+                    "ai_atr": atr, "decision_source": "ai_ppo_only",
+                    "ai_entry_observation": entry_obs, "ai_decision_candle_ms": decision_bar,
+                }, time.monotonic())
+                break
+        return pending, next_offset
+
+    def process_ai_candle(self, coin: str) -> int:
+        """Discretionary CLOSE is predicted from a new, CLOSED 5m candle."""
+        snap = self.ai_market.snapshot(coin, lookback=self.ai_policy.lookback)
+        if snap is None:
+            return 0
+        bars, bid, ask = snap
+        last_bar = int(bars[-1]["t"])
+        if self.ai_exit_seen.get(coin) == last_bar:
+            return 0
+        self.ai_exit_seen[coin] = last_bar
+        closed = 0
+        for account in ledger.COLLECTION.find({"position_open": True}):
+            p = account.get("position") or {}
+            if p.get("decision_source") != "ai_ppo_only" or _ws_coin(str(p.get("symbol",""))) != coin:
+                continue
+            try:
+                if p.get("ai_model_version") != self.ai_policy.version:
+                    logger.warning("DEMO_AI_POSITION_MODEL_MISMATCH user=%s; protective SL/TP remains active",
+                                   account["_id"])
+                    continue
+                view = deepcopy(p)
+                opened = datetime.fromisoformat(p["opened_at"])
+                view["ai_bars_held"] = max(0, (last_bar + BAR_MS -
+                    int(opened.timestamp()*1000)) // BAR_MS)
+                obs, _ = self.ai_policy.observe(bars, bid, ask, view)
+                action = self.ai_policy.predict(coin, obs)
+                logger.info("DEMO_AI_EXIT_DECISION user=%s coin=%s action=%s model=%s",
+                            account["_id"], coin, action.action, action.model_version)
+                # V3/V4 PPO can improve PAPER stops; never touches LIVE.
+                if action.action in ("PROTECT", "TRAIL") or (
+                    action.action == "WAIT" and p.get("ai_trailing_active")
+                ):
+                    from app.demo.ai_stop_management import tighten_stop, maybe_follow_trailing
+                    revised = (tighten_stop(p, bid, ask, action=action.action)
+                               if action.action in ("PROTECT", "TRAIL")
+                               else maybe_follow_trailing(p, bid, ask))
+                    if revised is not None:
+                        updated_account = deepcopy(account)
+                        updated_account["position"] = revised
+                        saved = ledger.save(account, updated_account)
+                        self.trace_trade("AI_STOP_TIGHTENED", int(account["_id"]),
+                                         saved["position"], ai_action=action.action)
+                    continue
+                if action.action != "CLOSE":
+                    continue
+                key = (int(account["_id"]), str(p.get("id") or ""))
+                snapshot = deepcopy(account)
+                if key in self.audit_pending:
+                    snapshot["position"].update(self.audit_pending[key])
+                updated = update_position(snapshot, bid, ask, force_close_reason="AI_EXIT")
+                if updated and not updated.get("position"):
+                    saved = ledger.save(account, updated)
+                    self.audit_pending.pop(key, None)
+                    self.audit_flush_at.pop(key, None)
+                    self.trace_trade("AI_CLOSED", int(account["_id"]), saved["history"][-1],
+                                     model=action.model_version)
+                    self.learn_closed_paper(saved["history"][-1])
+                    closed += 1
+            except ledger.Conflict:
+                logger.info("DEMO AI close race avoided user=%s", account["_id"])
+            except Exception:
+                logger.exception("DEMO AI exit failed user=%s", account["_id"])
+        return closed
+
+    def bootstrap_ai_candles(self) -> None:
+        """Bounded, one-time REST historical warmup; all subsequent ticks via WS."""
+        if not AI_DEMO_MODE:
+            return
+        import httpx
+        host = ("https://api.hyperliquid-testnet.xyz/info"
+                if "hyperliquid-testnet.xyz" in HL_WS_URL
+                else "https://api.hyperliquid.xyz/info")
+        now = int(time.time()*1000)
+        for coin in self.ai_universe:
+            try:
+                payload = {"type": "candleSnapshot", "req": {"coin": coin,
+                    "interval": "5m", "startTime": now - BAR_MS*(self.ai_policy.lookback + 25),
+                    "endTime": now}}
+                response = httpx.post(host, json=payload, timeout=12)
+                response.raise_for_status()
+                data = response.json()
+                if not isinstance(data, list):
+                    raise ValueError("invalid candleSnapshot")
+                count = self.ai_market.prime(coin, data)
+                logger.info("DEMO_AI_BOOTSTRAP coin=%s candles=%s", coin, count)
+            except Exception:
+                logger.exception("DEMO AI bootstrap failed coin=%s; no invented history", coin)
+
     def collect_signals(self) -> tuple[dict[int, tuple[dict, float]], int]:
-        """Blocking strategy evaluation; never executed on the WebSocket event loop."""
+        """Decision collection in dedicated scanner thread."""
+        if AI_DEMO_MODE:
+            return self.collect_ai_signals()
         from app import trading_engine as engine
         eligible = sorted(
             (a for a in ledger.COLLECTION.find({'enabled': True, 'position': None})
@@ -418,6 +667,8 @@ class DemoMarketRunner:
         self.pending_by_user = {uid: p for uid, p in self.pending_by_user.items() if now - p[1] <= 30}
         wanted.update(_ws_coin(str(selected['symbol'])) for selected, _ in self.pending_by_user.values())
         wanted.discard('')
+        if AI_DEMO_MODE:
+            wanted.update(self.ai_universe)
         # Protección de límites de upstream: si se supera el máximo, abortar
         # para no fingir que el motor puede gestionar todos los SL.
         if len(wanted) > 100:
@@ -427,6 +678,15 @@ class DemoMarketRunner:
         for symbol in sorted(self.subscribed - wanted):
             await ws.send(json.dumps({'method': 'unsubscribe', 'subscription': {'type': 'l2Book', 'coin': symbol}}))
         self.subscribed = wanted
+        if AI_DEMO_MODE:
+            requested = set(self.ai_universe)
+            for coin in sorted(requested-self.candle_subscribed):
+                await ws.send(json.dumps({"method":"subscribe","subscription":
+                    {"type":"candle","coin":coin,"interval":"5m"}}))
+            for coin in sorted(self.candle_subscribed-requested):
+                await ws.send(json.dumps({"method":"unsubscribe","subscription":
+                    {"type":"candle","coin":coin,"interval":"5m"}}))
+            self.candle_subscribed = requested
 
     async def run_socket(self):
         from websockets import connect
@@ -434,13 +694,27 @@ class DemoMarketRunner:
             raise RuntimeError('HYPERLIQUID_WS_URL debe utilizar wss://')
         async with connect(HL_WS_URL, ping_interval=20, ping_timeout=20, max_size=2**20) as ws:
             self.subscribed = set()
+            self.candle_subscribed = set()
             self.pending_by_user.clear()
+            if AI_DEMO_MODE:
+                # Never resume an old cache after a reconnect/outage.
+                self.ai_market = CandleStore()
+                self.ai_exit_seen.clear()
             self.next_scan = time.monotonic()
             self.next_lease = time.monotonic()
             self.next_ping = time.monotonic() + 25
             self.next_status = time.monotonic()
             if not await asyncio.to_thread(acquire_lease):
                 raise RuntimeError('La réplica DEMO no es el líder')
+            if AI_DEMO_MODE:
+                await asyncio.to_thread(activate_owner_paper_once)
+                await asyncio.to_thread(self.bootstrap_ai_candles)
+                # Recover closed AI examples whose asynchronous archive previously
+                # failed; read-only on accounts, idempotent upsert on private AI store.
+                from app.demo.ai_experience import backfill_closed_experiences
+                asyncio.create_task(asyncio.to_thread(
+                    backfill_closed_experiences, ledger.COLLECTION,
+                    db['demo_ai_experiences']))
             await self.subscribe_new(ws)
             # Once per successful leader start: bounded read-only 1m replay
             # of the five most recent retained DEMO closes.
@@ -488,8 +762,22 @@ class DemoMarketRunner:
                     continue  # solo timer de scanner/lease, NO polling de mercado
                 book = decode_book(raw)
                 if not book:
+                    if AI_DEMO_MODE:
+                        try:
+                            event = json.loads(raw)
+                            if event.get("channel") == "candle" and isinstance(event.get("data"), dict):
+                                data = event["data"]
+                                coin = str(data.get("s", "")).upper()
+                                if coin in self.ai_universe and self.ai_market.push_candle(data):
+                                    ai_closed = await asyncio.to_thread(self.process_ai_candle, coin)
+                                    if ai_closed:
+                                        await self.subscribe_new(ws)
+                        except (ValueError, TypeError):
+                            logger.warning("DEMO_AI_BAD_CANDLE_MESSAGE")
                     continue
                 symbol, bid, ask = book
+                if AI_DEMO_MODE:
+                    self.ai_market.push_book(symbol, bid, ask)
                 if symbol not in self.subscribed:
                     continue
                 _, closed = await asyncio.to_thread(self.protected_positions, symbol, bid, ask)
@@ -514,19 +802,34 @@ async def async_main() -> None:
         raise SystemExit('DEMO_ENABLED=false')
     if os.getenv('DEMO_WORKER_MODE', '').lower() != 'true':
         raise SystemExit('DEMO_WORKER_MODE=true requerido en servicio worker dedicado')
+    if DEMO_DECISION_ENGINE != "ai_ppo":
+        raise SystemExit("DEMO_DECISION_ENGINE=ai_ppo required: legacy strategies disabled")
+    # Validate approved model before starting the reconnect loop.
+    manifest = os.getenv("DEMO_AI_MANIFEST", "models/trading_x_ppo/manifest.json")
+    policy = PPOPolicy(manifest)
+    if policy.research_only:
+        logger.warning("DEMO_AI_PAPER_RESEARCH_ACTIVE approved_for_demo=false live_orders=FORBIDDEN "
+                       "model=%s: collecting real paper-trade outcomes for offline PPO refinement",
+                       policy.version)
+    runtime_coins = configured_symbols(policy.symbols)
+    if not set(runtime_coins).issubset(policy.symbols):
+        raise SystemExit("DEMO_AI_SYMBOLS not present in approved model")
+    logger.info("DEMO_AI_UNIVERSE trained=%s active=%s coins=%s",
+                len(policy.symbols), len(runtime_coins), ",".join(runtime_coins))
     ledger.COLLECTION.create_index('enabled')
     ledger.COLLECTION.create_index('position.symbol')
     from app.config import SCAN_INTERVAL, SCANNER_MIN_TOP_BOOK_NOTIONAL
     from app.demo.settings import DEMO_BREAK_EVEN_ENABLED
     from app.strategies.liquidity_sweep_reversal import SWEEP_MAX_AGE_BARS
     logger.info(
-        'DEMO_LIVE_PARITY strategy_context=live scanner_context=live '
+        'DEMO_PREVIOUS_PARITY_DISABLED strategy_context=NOT_USED scanner_context=NOT_USED '
         'H1_M15_M5=live liquidity_sweep_max_age_bars=%s '
         'break_even=%s fallback_alternatives=off '
         'scanner_s=%.1f live_scanner_s=%s scanner_book_usdc=%.2f '
         'execution=paper_bid_ask_only',
         SWEEP_MAX_AGE_BARS, DEMO_BREAK_EVEN_ENABLED,
         DEMO_SCAN_SECONDS, SCAN_INTERVAL, SCANNER_MIN_TOP_BOOK_NOTIONAL)
+    logger.info("DEMO_AI_PPO_ONLY model_required=true strategy_router=disabled live_execution=disabled")
     logger.info('DEMO WebSocket event-driven; no LIVE execution; private keys never loaded')
     delay = 1
     while True:

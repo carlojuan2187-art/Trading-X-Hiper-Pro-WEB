@@ -1,0 +1,2 @@
+-r requirements-ai-train.txt
+sb3-contrib==2.6.0

@@ -136,7 +136,10 @@ class V4RuntimeTests(unittest.TestCase):
             })
         self.assertEqual(store.prime("BTC",original),505)
         store.push_book("BTC",107.55,107.56)
-        snap=store.snapshot("BTC",now_ms=aligned,lookback=ADVANCED_HISTORY_BARS)
+        # Snapshot freshness must use live wall-clock milliseconds; the
+        # latest CLOSED candle ends at "aligned", but the book was just received.
+        snap=store.snapshot("BTC",now_ms=int(time.time()*1000),
+                            lookback=ADVANCED_HISTORY_BARS)
         self.assertIsNotNone(snap)
         candles,bid,ask=snap
         self.assertIsInstance(candles[-1]["c"],float)

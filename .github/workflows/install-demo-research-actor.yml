@@ -1,54 +1,12 @@
-name: Install isolated paper PPO research checkpoint
+# Deprecated installer of PPO V2. Kept as explicit documentation and no-op.
+# A V2 research actor must never silently replace a V4 actor on DEMO.
+name: Deprecated PPO V2 installer (disabled)
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/install-demo-research-actor.yml'
-
+  workflow_dispatch:
 permissions:
-  contents: write
-  actions: read
-
+  contents: read
 jobs:
-  install-paper-checkpoint:
-    if: github.event.pull_request.number == 24 && github.event.pull_request.head.repo.full_name == github.repository
+  retired:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-      - name: Download verified research checkpoint artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          gh api "/repos/$GH_REPO/actions/artifacts/12211294944/zip" > /tmp/trading_x_pporesearch.zip
-          mkdir -p models/trading_x_ppo
-          unzip -p /tmp/trading_x_pporesearch.zip actor.json > models/trading_x_ppo/actor.json
-          unzip -p /tmp/trading_x_pporesearch.zip manifest.json > models/trading_x_ppo/manifest.json
-          unzip -p /tmp/trading_x_pporesearch.zip ppo_model.zip > models/trading_x_ppo/ppo_model.zip
-      - name: Validate source, integrity and research-only status
-        run: |
-          python - <<'PY'
-          import hashlib, json
-          from pathlib import Path
-          m = json.loads(Path("models/trading_x_ppo/manifest.json").read_text())
-          assert m["approved_for_demo"] is False
-          assert m["universe_source"] == "LIVE_SCANNER_PREFILTER"
-          assert len(m["trained_symbols"]) >= 30
-          assert "NEGATIVE_OR_FLAT_HOLDOUT_PNL" in m["candidate_quality"]["candidate_quality_reasons"]
-          for f, h in ((m["actor_file"], m["actor_sha256"]), (m["training_checkpoint_file"], m["training_checkpoint_sha256"])):
-              assert hashlib.sha256((Path("models/trading_x_ppo")/f).read_bytes()).hexdigest() == h
-          print("DEMO_RESEARCH_MODEL_VERIFIED model=%s coins=%d approval=false" % (m["version"], len(m["trained_symbols"])))
-          PY
-      - name: Commit research-only checkpoint to isolated feature branch
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin "$HEAD_REF"
-          git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
-          git add -f models/trading_x_ppo/actor.json models/trading_x_ppo/manifest.json models/trading_x_ppo/ppo_model.zip
-          git diff --cached --quiet || git commit -m "chore(demo): pin verified PPO research checkpoint (paper-only, unapproved)"
-          git push origin "HEAD:$HEAD_REF"
+      - run: echo "PPO V2 automatic installer retired. Use vetted V4 research workflow and manual approval."

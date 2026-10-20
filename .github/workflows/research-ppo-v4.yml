@@ -1,6 +1,8 @@
 name: Trading X PPO V4 Research
 on:
-  pull_request:
+  push:
+    branches:
+      - feature/demo-autonomous-ppo
     paths:
       - 'tools/train_demo_ppo_v4.py'
       - 'tools/ppo_skill_curriculum_v4.py'
@@ -11,11 +13,11 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: trading-x-v4-${{ github.event.pull_request.number || github.ref }}
+  group: trading-x-v4-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   v4:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 24
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 65
     steps:

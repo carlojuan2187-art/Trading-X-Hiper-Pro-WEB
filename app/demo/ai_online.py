@@ -29,7 +29,7 @@ class PaperFeedbackActor:
         if self.actions[:4] != ACTIONS:
             raise ValueError("invalid_online_feedback_action_contract")
         self.rate = rate
-        self.weights = [[0.0]*size for _ in self.actions
+        self.weights = [[0.0]*size for _ in self.actions]
         self.bias = [0.0 for _ in self.actions]
         self.seen: set[str] = set()
         self.updated = 0

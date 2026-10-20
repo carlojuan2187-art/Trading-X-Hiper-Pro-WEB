@@ -23,21 +23,24 @@ def probabilities(logits: list[float]) -> list[float]:
 
 class PaperFeedbackActor:
     """Bounded model-local correction learned online from closed net PnL."""
-    def __init__(self, size: int = 32, *, rate: float = 0.025):
+    def __init__(self, size: int = 32, *, rate: float = 0.025, actions=ACTIONS):
         self.size = size
+        self.actions = tuple(actions)
+        if self.actions[:4] != ACTIONS:
+            raise ValueError("invalid_online_feedback_action_contract")
         self.rate = rate
-        self.weights = [[0.0]*size for _ in range(4)]
-        self.bias = [0.0]*4
+        self.weights = [[0.0]*size for _ in self.actions
+        self.bias = [0.0 for _ in self.actions]
         self.seen: set[str] = set()
         self.updated = 0
         self.positive = 0
         self.negative = 0
 
     def logits(self, base_logits: list[float], embedding: list[float]) -> list[float]:
-        if len(embedding) != self.size or len(base_logits) < 4:
+        if len(embedding) != self.size or len(base_logits) < len(self.actions):
             raise ValueError("online_feedback_shape")
         output = list(base_logits)
-        for k in range(4):
+        for k in range(len(self.actions)):
             output[k] += self.bias[k] + sum(w*h for w, h in zip(self.weights[k], embedding))
         return output
 
@@ -58,8 +61,8 @@ class PaperFeedbackActor:
         if len(hidden) != self.size:
             raise ValueError("feedback_embedding_shape")
         corrected = self.logits(base_logits, hidden)
-        probs = probabilities(corrected[:4])
-        target = ACTIONS.index(action)
+        probs = probabilities(corrected[:len(self.actions)])
+        target = self.actions.index(action)
         # ±1 directional reward measured with REAL realized AFTER-FEES PnL.
         # 3% of margin is typical scale; tanh robustly clips extreme outliers.
         advantage = math.tanh(pnl / (0.03 * margin))

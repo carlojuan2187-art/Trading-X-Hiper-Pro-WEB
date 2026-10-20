@@ -17,7 +17,8 @@ from unittest.mock import patch
 
 from app.demo.ai_ppo import PPOPolicy
 from app.demo.ai_v4 import SKILLS_OBS_NAMES, SKILLS_MODEL_SCHEMA
-from app.demo.ai_features import OBS_NAMES, ADVANCED_HISTORY_BARS
+from app.demo.ai_features import OBS_NAMES, ADVANCED_HISTORY_BARS, CandleStore, BAR_MS
+from app.demo.ai_v4 import skills_observation
 from app.demo.ai_experience import clean_observation
 from app.config import LEVERAGE, POSITION_PERCENT, MAX_TRADE_MARGIN_USDC
 from app.demo.settings import DEMO_TAKER_FEE_BPS, DEMO_SLIPPAGE_BPS
@@ -117,6 +118,33 @@ class V4RuntimeTests(unittest.TestCase):
                 # Unapproved actors cannot use this in any nonresearch mode.
                 with self.assertRaisesRegex(ValueError,"not approved"):
                     PPOPolicy(str(m))
+
+    def test_hyperliquid_string_candles_normalize_before_mtf(self):
+        # Hyperliquid public candleSnapshot and WS candles encode numeric
+        # OHLCV as strings; the V4 runtime must match float CSV training data.
+        import time
+        aligned = int(time.time()*1000)//BAR_MS*BAR_MS
+        store = CandleStore()
+        original = []
+        for index in range(505):
+            price = 100.0 + index*0.015
+            original.append({
+                "s":"BTC", "i":"5m", "t":aligned-(505-index)*BAR_MS,
+                "o":str(price), "h":str(price+0.03),
+                "l":str(price-0.03), "c":str(price+0.01),
+                "v":str(10+index%7),
+            })
+        self.assertEqual(store.prime("BTC",original),505)
+        store.push_book("BTC",107.55,107.56)
+        snap=store.snapshot("BTC",now_ms=aligned,lookback=ADVANCED_HISTORY_BARS)
+        self.assertIsNotNone(snap)
+        candles,bid,ask=snap
+        self.assertIsInstance(candles[-1]["c"],float)
+        values,atr=skills_observation(candles,bid,ask)
+        self.assertEqual(len(values),len(SKILLS_OBS_NAMES))
+        self.assertGreater(atr,0)
+        bad=dict(original[-1],t=aligned,o="not-a-price")
+        self.assertFalse(store.push_candle(bad))
 
     def test_invalid_action_contract_rejected(self):
         with tempfile.TemporaryDirectory() as td:

@@ -108,12 +108,18 @@ class CandleStore:
             coin = str(data["s"]).upper()
             if data["i"] != "5m":
                 return False
-            row = {k: data[k] for k in ("t", "o", "h", "l", "c", "v")}
-            row["t"] = int(row["t"])
+            # Hyperliquid REST/WS market candles may encode numeric OHLCV
+            # fields as strings. Normalize at the store boundary so V4 MTF
+            # indicators never encounter string arithmetic in production.
+            row = {"t": int(data["t"])}
+            for field in ("o", "h", "l", "c", "v"):
+                row[field] = float(data[field])
             if row["t"] % BAR_MS:
                 return False
-            values = [float(row[k]) for k in ("o", "h", "l", "c", "v")]
-            if not all(map(math.isfinite, values)) or min(values[:4]) <= 0:
+            values = [row[k] for k in ("o", "h", "l", "c", "v")]
+            if (not all(map(math.isfinite, values)) or min(values[:4]) <= 0
+                    or row["v"] < 0 or row["l"] > min(row["o"], row["c"])
+                    or row["h"] < max(row["o"], row["c"])):
                 return False
             with self.lock:
                 existing = self.rows[coin]

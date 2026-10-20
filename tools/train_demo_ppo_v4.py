@@ -253,6 +253,7 @@ def main():
     p.add_argument("--universe-report",required=True)
     p.add_argument("--output",default="models/trading_x_ppo_v4_market_skills_research")
     p.add_argument("--steps",type=int,default=120000)
+    p.add_argument("--seed",type=int,default=21,help="Reproducible experimental seed")
     p.add_argument("--initial-capital",type=float,default=100)
     p.add_argument("--leverage",type=int,default=10)
     p.add_argument("--margin-cap",type=float,default=25)
@@ -297,8 +298,8 @@ def main():
         # Warm up indicators ONLY on older training-time candles. Scored
         # actions begin at split; labels and rewards come from future holdout.
         holdout[symbol]=rows[split-ADVANCED_HISTORY_BARS:]
-    env=research_env(train,training=True,profile=profile)
-    model=MaskablePPO("MlpPolicy",env,verbose=0,seed=21,device="cpu",
+    env=research_env(train,training=True,profile=profile,seed=a.seed)
+    model=MaskablePPO("MlpPolicy",env,verbose=0,seed=a.seed,device="cpu",
                       n_steps=1024,batch_size=256,gamma=.995,
                       gae_lambda=.97,learning_rate=1e-4,ent_coef=.015,
                       policy_kwargs={"net_arch":{"pi":[64,64],"vf":[64,64]},
@@ -306,9 +307,9 @@ def main():
     if not a.skip_curriculum:
         lessons=build_skills_curriculum(
             train,profile,flat_per_symbol=a.lessons_per_symbol,
-            manage_per_symbol=a.management_lessons_per_symbol)
+            manage_per_symbol=a.management_lessons_per_symbol,seed=a.seed)
         lesson_report=pretrain_skills_actor(
-            model,lessons,epochs=a.curriculum_epochs)
+            model,lessons,epochs=a.curriculum_epochs,seed=a.seed)
     else:
         lesson_report={"stage":"ABLATION_PPO_ONLY","lessons":0,"epochs":0}
     print("V4_SKILL_CURRICULUM "+json.dumps(lesson_report,sort_keys=True),flush=True)
@@ -320,11 +321,21 @@ def main():
     pnl=sum(x["net_pnl_usdc"] for x in results.values())
     pos=sum(x["gross_profit_usdc"] for x in results.values())
     neg=sum(x["gross_loss_usdc"] for x in results.values())
+    active_symbols=sum(1 for x in results.values() if x["trades"] > 0)
+    flat_actions={action:sum(x["actions_flat"].get(action,0) for x in results.values())
+                  for action in ADVANCED_ACTIONS}
+    position_actions={action:sum(x["actions_position"].get(action,0) for x in results.values())
+                      for action in ADVANCED_ACTIONS}
     reasons=[]
     if trades<len(symbols): reasons.append("INSUFFICIENT_HOLDOUT_TRADES")
+    if active_symbols < math.ceil(len(symbols)*0.60):
+        reasons.append("INSUFFICIENT_SYMBOL_ACTIVITY")
     if pnl<=0: reasons.append("NEGATIVE_OR_FLAT_NET_PNL")
     if any(x["max_drawdown"]>.25 for x in results.values()): reasons.append("EXCESSIVE_SINGLE_MARKET_DRAWDOWN")
     quality={"trades":trades,"wins":sum(x["wins"] for x in results.values()),
+             "active_symbols":active_symbols,"trained_symbols":len(symbols),
+             "action_distribution_flat":flat_actions,
+             "action_distribution_in_position":position_actions,
              "net_pnl_sum_separate_100usdc_accounts":round(pnl,4),
              "profit_factor_aggregated":round(pos/neg,4) if neg else None,
              "stop_moves":sum(x["stop_moves"] for x in results.values()),
@@ -350,6 +361,7 @@ def main():
           "actor_file":"actor.json","actor_sha256":sha256(actor_data).hexdigest(),
           "trained_symbols":symbols,"approved_for_demo":False,
           "training_algorithm":"MaskablePPO","training_steps":int(model.num_timesteps),
+          "training_seed":a.seed,
           "training_checkpoint_file":"ppo_model.zip",
           "training_checkpoint_sha256":sha256((output/"ppo_model.zip").read_bytes()).hexdigest(),
           "runtime_profile":profile,"universe_source":"LIVE_SCANNER_PREFILTER",

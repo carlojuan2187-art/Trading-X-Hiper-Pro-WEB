@@ -59,6 +59,52 @@ def acquire_lease() -> bool:
     ).modified_count == 1
 
 
+def activate_owner_paper_once() -> None:
+    """One-time, owner-only DEMO opt-in. Never activates other users or LIVE.
+
+    Off by default. A persistent marker means stopping DEMO later remains
+    respected across restarts even if the bootstrap env flag stays enabled.
+    Called only after the Mongo worker leadership lease is acquired.
+    """
+    if os.getenv("DEMO_AI_OWNER_PAPER_AUTOSTART", "false").strip().lower() != "true":
+        return
+    if not AI_DEMO_MODE or not os.getenv("DEMO_AI_PAPER_RESEARCH_MODE", "").lower() == "true":
+        raise RuntimeError("Owner paper startup requires isolated AI research DEMO")
+    try:
+        owner = int(os.getenv("ADMIN_TELEGRAM_ID") or 0)
+    except ValueError as exc:
+        raise RuntimeError("Invalid owner for paper DEMO startup") from exc
+    if owner <= 0:
+        raise RuntimeError("Owner Telegram ID required for paper DEMO startup")
+    if ledger.COLLECTION.count_documents({"enabled": True}) > 0:
+        logger.info("DEMO_AI_OWNER_PAPER_START skipped=EXISTING_ENABLED_ACCOUNT")
+        return
+    # A human account that has been paused must NOT be restarted on each
+    # deployment. This marker is permanent, separate from trade history.
+    marks = db["demo_ai_owner_autostart"]
+    ident = "ppo_v4_owner_activation_once_20261020"
+    from pymongo.errors import DuplicateKeyError
+    try:
+        marks.insert_one({"_id": ident, "owner": owner,
+                          "created_at": datetime.now(timezone.utc)})
+    except DuplicateKeyError:
+        logger.info("DEMO_AI_OWNER_PAPER_START skipped=ALREADY_CONSUMED")
+        return
+    try:
+        account = ledger.get_or_create(owner)
+        if not account.get("enabled"):
+            account = ledger.change_status(owner, active=True)
+        logger.warning(
+            "DEMO_AI_OWNER_PAPER_STARTED mode=PAPER_ONLY owner=%s eligible=%s balance=%.2f "
+            "autostart=ONE_TIME live_orders=FORBIDDEN",
+            owner, ai_gate(account) is None, float(account.get("balance_usdc") or 0))
+    except Exception:
+        # Don't burn the one-time opportunity when a transient Mongo failure
+        # prevented the requested activation. No other accounts are changed.
+        marks.delete_one({"_id": ident})
+        raise
+
+
 def tick(*, do_scan: bool = False, quote_provider=None, selector=None) -> dict:
     """Historical test adapter only. Production AI never uses this function."""
     if AI_DEMO_MODE and do_scan:
@@ -661,6 +707,7 @@ class DemoMarketRunner:
             if not await asyncio.to_thread(acquire_lease):
                 raise RuntimeError('La réplica DEMO no es el líder')
             if AI_DEMO_MODE:
+                await asyncio.to_thread(activate_owner_paper_once)
                 await asyncio.to_thread(self.bootstrap_ai_candles)
                 # Recover closed AI examples whose asynchronous archive previously
                 # failed; read-only on accounts, idempotent upsert on private AI store.

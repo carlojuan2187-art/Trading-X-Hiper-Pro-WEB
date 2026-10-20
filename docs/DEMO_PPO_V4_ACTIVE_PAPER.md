@@ -25,3 +25,14 @@ across 54 markets. The previously deployed V4-v1 actor also had negative
 holdout performance and is *not approved*. Never use this research mode
 for LIVE trading. Retrain a new policy with a real positive net holdout
 before considering promotion.
+
+## One-time owner-only paper account activation
+
+When all paper accounts are disabled, the owner may request activity with
+`DEMO_AI_OWNER_PAPER_AUTOSTART=true` on the dedicated DEMO worker. Once the
+worker owns its Mongo lease, it creates/enables only the account identified by
+`ADMIN_TELEGRAM_ID`. It never touches LIVE orders or other user accounts. An
+idempotent persistent marker ensures later user pauses survive restarts. If
+there is already any enabled account, this bootstrap does nothing. The owner
+can still pause DEMO via the existing UI, and this automatic activation will
+not recur. The account's simulated capital and history are never reset.

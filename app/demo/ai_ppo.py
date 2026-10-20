@@ -31,6 +31,8 @@ from app.demo.settings import DEMO_TAKER_FEE_BPS, DEMO_SLIPPAGE_BPS
 from app.demo.ai_features import (
     BAR_MS, OBS_NAMES, ACTIONS, STOP_ATR, TAKE_ATR, MODEL_SCHEMA,
     CandleStore, configured_symbols, observation,
+    ADVANCED_OBS_NAMES, ADVANCED_ACTIONS, ADVANCED_MODEL_SCHEMA,
+    ADVANCED_HISTORY_BARS, advanced_observation,
 )
 
 
@@ -63,7 +65,12 @@ class PPOPolicy:
     def __init__(self, manifest_path: str):
         path = Path(manifest_path)
         meta = json.loads(path.read_text(encoding="utf-8"))
-        if meta.get("schema") != MODEL_SCHEMA or meta.get("observation_names") != list(OBS_NAMES):
+        self.advanced = meta.get("schema") == ADVANCED_MODEL_SCHEMA
+        self.obs_names = ADVANCED_OBS_NAMES if self.advanced else OBS_NAMES
+        self.actions = ADVANCED_ACTIONS if self.advanced else ACTIONS
+        self.lookback = ADVANCED_HISTORY_BARS if self.advanced else 40
+        if (meta.get("schema") not in (MODEL_SCHEMA, ADVANCED_MODEL_SCHEMA)
+                or meta.get("observation_names") != list(self.obs_names)):
             raise ValueError("PPO model/observation schema mismatch")
         # The user may explicitly opt into PAPER-ONLY research with an
         # unapproved model. Negative/unknown PnL is acceptable for simulated
@@ -77,7 +84,7 @@ class PPOPolicy:
         if not is_approved and not research_only:
             raise ValueError("PPO model not approved for demo; paper research requires explicit isolated opt-in")
         self.research_only = bool(research_only)
-        if meta.get("action_dims") != [4, 3, 3]:
+        if meta.get("action_dims") != [len(self.actions), 3, 3]:
             raise ValueError("PPO action schema mismatch")
         cap = float(os.getenv("DEMO_AI_MAX_MARGIN_USDC", "25"))
         effective_cap = min(cap, MAX_TRADE_MARGIN_USDC) if MAX_TRADE_MARGIN_USDC > 0 else cap
@@ -99,9 +106,9 @@ class PPOPolicy:
         actor = json.loads(raw)
         if actor.get("activation") != "tanh" or len(actor.get("hidden", [])) != 2:
             raise ValueError("unsupported PPO actor architecture")
-        if len(actor["hidden"][0]["weight"][0]) != len(OBS_NAMES):
+        if len(actor["hidden"][0]["weight"][0]) != len(self.obs_names):
             raise ValueError("actor input shape")
-        if len(actor["head"]["weight"]) != 10:
+        if len(actor["head"]["weight"]) != len(self.actions) + 6:
             raise ValueError("actor output shape")
         self.layers = actor["hidden"]
         self.head = actor["head"]
@@ -110,7 +117,7 @@ class PPOPolicy:
         if not symbols or not isinstance(symbols, list):
             raise ValueError("missing training symbols")
         self.symbols = set(symbols)
-        self.feedback = PaperFeedbackActor(size=len(self.layers[-1]["bias"]))
+        self.feedback = PaperFeedbackActor(size=len(self.layers[-1]["bias"]), actions=self.actions)
         self.feedback_lock = RLock()
 
     def _features(self, obs: list[float]) -> tuple[list[float], list[float]]:
@@ -129,23 +136,32 @@ class PPOPolicy:
     def restore_closed_trades(self, records) -> dict:
         """Reconstruct bounded learned corrections deterministically after restart."""
         with self.feedback_lock:
-            self.feedback = PaperFeedbackActor(size=len(self.layers[-1]["bias"]))
+            self.feedback = PaperFeedbackActor(size=len(self.layers[-1]["bias"]), actions=self.actions)
             for record in records:
                 self.observe_closed_trade(record)
             return self.feedback.snapshot()
 
     def predict(self, symbol: str, obs: list[float]) -> Decision:
-        if symbol not in self.symbols or len(obs) != len(OBS_NAMES) or not all(map(math.isfinite, obs)):
+        if symbol not in self.symbols or len(obs) != len(self.obs_names) or not all(map(math.isfinite, obs)):
             raise ValueError("symbol_not_trained_or_bad_features")
         with self.feedback_lock:
             x, base_logits = self._features(obs)
             logits = self.feedback.logits(base_logits, x)
-        action_p = _softmax(logits[:4])
-        # Deterministic argmax = no random exploration in DEMO.
-        action = max(range(4), key=lambda i: action_p[i])
-        stop = max(range(3), key=lambda i: logits[4+i])
-        take = max(range(3), key=lambda i: logits[7+i])
-        return Decision(symbol, ACTIONS[action], STOP_ATR[stop], TAKE_ATR[take],
+        primary_count = len(self.actions)
+        if self.advanced:
+            # Only valid state actions: flat -> WAIT/LONG/SHORT, in trade ->
+            # WAIT/CLOSE/PROTECT/TRAIL. No invalid CLOSE while flat.
+            in_position = obs[OBS_NAMES.index("position_sign")] != 0
+            valid = (0, 3, 4, 5) if in_position else (0, 1, 2)
+            masked = [logits[i] if i in valid else -1e9 for i in range(primary_count)]
+            action_p = _softmax(masked)
+            action = max(valid, key=lambda i: action_p[i])
+        else:
+            action_p = _softmax(logits[:primary_count])
+            action = max(range(primary_count), key=lambda i: action_p[i])
+        stop = max(range(3), key=lambda i: logits[primary_count+i])
+        take = max(range(3), key=lambda i: logits[primary_count+3+i])
+        return Decision(symbol, self.actions[action], STOP_ATR[stop], TAKE_ATR[take],
                         action_p[action], self.version)
 
 
@@ -212,7 +228,8 @@ def open_ai_position(account: dict, decision: Decision, bid: float, ask: float,
         "decision_source": "ai_ppo_only", "ai_model_version": decision.model_version,
         "ai_action_probability": decision.probability, "ai_bars_held": 0,
         "ai_last_decision_bar": None, "ai_stop_atr": decision.stop_atr,
-        "ai_take_atr": decision.take_atr,
+        "ai_take_atr": decision.take_atr, "ai_entry_atr": atr,
+        "ai_trailing_active": False, "ai_stop_moves": 0,
         "opened_at": now_iso(), "entry_fee_usdc": fee,
         "demo_be_enabled": False, "demo_be_armed": False,
         "mark_price": (bid+ask)/2, "unrealized_pnl_usdc": 0.0,

@@ -34,6 +34,7 @@ from app.demo.ai_features import (
     ADVANCED_OBS_NAMES, ADVANCED_ACTIONS, ADVANCED_MODEL_SCHEMA,
     ADVANCED_HISTORY_BARS, advanced_observation,
 )
+from app.demo.ai_v4 import SKILLS_MODEL_SCHEMA, SKILLS_OBS_NAMES, skills_observation
 
 
 def _linear(x: list[float], layer: dict) -> list[float]:
@@ -65,11 +66,14 @@ class PPOPolicy:
     def __init__(self, manifest_path: str):
         path = Path(manifest_path)
         meta = json.loads(path.read_text(encoding="utf-8"))
-        self.advanced = meta.get("schema") == ADVANCED_MODEL_SCHEMA
-        self.obs_names = ADVANCED_OBS_NAMES if self.advanced else OBS_NAMES
+        schema = meta.get("schema")
+        self.v4 = schema == SKILLS_MODEL_SCHEMA
+        self.advanced = schema in (ADVANCED_MODEL_SCHEMA, SKILLS_MODEL_SCHEMA)
+        self.obs_names = (SKILLS_OBS_NAMES if self.v4 else
+                          ADVANCED_OBS_NAMES if self.advanced else OBS_NAMES)
         self.actions = ADVANCED_ACTIONS if self.advanced else ACTIONS
         self.lookback = ADVANCED_HISTORY_BARS if self.advanced else 40
-        if (meta.get("schema") not in (MODEL_SCHEMA, ADVANCED_MODEL_SCHEMA)
+        if (schema not in (MODEL_SCHEMA, ADVANCED_MODEL_SCHEMA, SKILLS_MODEL_SCHEMA)
                 or meta.get("observation_names") != list(self.obs_names)):
             raise ValueError("PPO model/observation schema mismatch")
         # The user may explicitly opt into PAPER-ONLY research with an
@@ -140,6 +144,14 @@ class PPOPolicy:
             for record in records:
                 self.observe_closed_trade(record)
             return self.feedback.snapshot()
+
+    def observe(self, candles, bid: float, ask: float, position=None):
+        """Version-locked observations exactly matching the PPO trainer."""
+        if self.v4:
+            return skills_observation(candles, bid, ask, position)
+        if self.advanced:
+            return advanced_observation(candles, bid, ask, position)
+        return observation(candles, bid, ask, position)
 
     def predict(self, symbol: str, obs: list[float]) -> Decision:
         if symbol not in self.symbols or len(obs) != len(self.obs_names) or not all(map(math.isfinite, obs)):

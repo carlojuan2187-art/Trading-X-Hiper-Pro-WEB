@@ -430,12 +430,12 @@ class DemoMarketRunner:
         next_offset = (start+len(pool)) % len(eligible)
         candidates = []
         for coin in self.ai_universe:
-            snap = self.ai_market.snapshot(coin)
+            snap = self.ai_market.snapshot(coin, lookback=self.ai_policy.lookback)
             if snap is None:
                 continue
             bars, bid, ask = snap
             try:
-                obs, atr = observation(bars, bid, ask)
+                obs, atr = self.ai_policy.observe(bars, bid, ask)
                 decision = self.ai_policy.predict(coin, obs)
                 logger.info("DEMO_AI_DECISION coin=%s action=%s model=%s prob=%.4f sl_atr=%.2f tp_atr=%.2f",
                             coin, decision.action, decision.model_version,
@@ -467,7 +467,7 @@ class DemoMarketRunner:
 
     def process_ai_candle(self, coin: str) -> int:
         """Discretionary CLOSE is predicted from a new, CLOSED 5m candle."""
-        snap = self.ai_market.snapshot(coin)
+        snap = self.ai_market.snapshot(coin, lookback=self.ai_policy.lookback)
         if snap is None:
             return 0
         bars, bid, ask = snap
@@ -489,10 +489,25 @@ class DemoMarketRunner:
                 opened = datetime.fromisoformat(p["opened_at"])
                 view["ai_bars_held"] = max(0, (last_bar + BAR_MS -
                     int(opened.timestamp()*1000)) // BAR_MS)
-                obs, _ = observation(bars, bid, ask, view)
+                obs, _ = self.ai_policy.observe(bars, bid, ask, view)
                 action = self.ai_policy.predict(coin, obs)
                 logger.info("DEMO_AI_EXIT_DECISION user=%s coin=%s action=%s model=%s",
                             account["_id"], coin, action.action, action.model_version)
+                # V3/V4 PPO can improve PAPER stops; never touches LIVE.
+                if action.action in ("PROTECT", "TRAIL") or (
+                    action.action == "WAIT" and p.get("ai_trailing_active")
+                ):
+                    from app.demo.ai_stop_management import tighten_stop, maybe_follow_trailing
+                    revised = (tighten_stop(p, bid, ask, action=action.action)
+                               if action.action in ("PROTECT", "TRAIL")
+                               else maybe_follow_trailing(p, bid, ask))
+                    if revised is not None:
+                        updated_account = deepcopy(account)
+                        updated_account["position"] = revised
+                        saved = ledger.save(account, updated_account)
+                        self.trace_trade("AI_STOP_TIGHTENED", int(account["_id"]),
+                                         saved["position"], ai_action=action.action)
+                    continue
                 if action.action != "CLOSE":
                     continue
                 key = (int(account["_id"]), str(p.get("id") or ""))
@@ -526,7 +541,7 @@ class DemoMarketRunner:
         for coin in self.ai_universe:
             try:
                 payload = {"type": "candleSnapshot", "req": {"coin": coin,
-                    "interval": "5m", "startTime": now - BAR_MS*65,
+                    "interval": "5m", "startTime": now - BAR_MS*(self.ai_policy.lookback + 25),
                     "endTime": now}}
                 response = httpx.post(host, json=payload, timeout=12)
                 response.raise_for_status()

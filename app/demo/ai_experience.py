@@ -9,10 +9,11 @@ import math
 from datetime import datetime, timezone
 
 from app.demo.ai_features import OBS_NAMES, ADVANCED_OBS_NAMES, ACTIONS
+from app.demo.ai_v4 import SKILLS_OBS_NAMES
 
 
 def clean_observation(values) -> list[float]:
-    if not isinstance(values, (list, tuple)) or len(values) not in (len(OBS_NAMES), len(ADVANCED_OBS_NAMES)):
+    if not isinstance(values, (list, tuple)) or len(values) not in (len(OBS_NAMES), len(ADVANCED_OBS_NAMES), len(SKILLS_OBS_NAMES)):
         raise ValueError("missing_or_incompatible_ai_observation")
     cleaned = [float(x) for x in values]
     if not all(math.isfinite(x) and -3 <= x <= 3 for x in cleaned):
